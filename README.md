@@ -16,6 +16,7 @@ TizenBrew → **Fernsurfer** auswählen → die Startseite (DuckDuckGo) öffnet 
 | Taste | Funktion |
 |---|---|
 | Pfeiltasten | Zeiger bewegen (gedrückt halten = schneller, am Rand wird gescrollt) |
+| Hoch am oberen Rand | Adressleiste (auch bei ausgeschaltetem Zeiger, wenn die Seite ganz oben ist); Runter schließt sie |
 | OK | Klicken (Textfelder öffnen die TV-Tastatur) |
 | Zurück | Vorherige Seite bzw. Textfeld oder Menü verlassen |
 | Rot | Adressleiste: Adresse oder Suchbegriff |
@@ -60,9 +61,9 @@ Danach erhöhst du `version` in `package.json` und erstellst einen neuen Tag.
 
 1. Leg auf GitHub ein **öffentliches** Repository an, zum Beispiel `fernsurfer`.
 2. Lade alles hoch außer `test/userScript.test.js` (siehe `.gitignore`).
-3. Erstell ein Release bzw. einen Tag `1.0.0`.
-4. Am Fernseher muss die Host PC IP auf `127.0.0.1` stehen. Öffne dann TizenBrew → **grüne Taste** (Modulverwaltung) → Modul hinzufügen → **GitHub** → `DEINNAME/fernsurfer@1.0.0` eintragen.
-   - `@1.0.0` friert die Version ein. Wenn TizenBrew das Modul so nicht findet, trag `DEINNAME/fernsurfer` ohne Version ein.
+3. Erstell ein Release bzw. einen Tag `1.0.1`.
+4. Am Fernseher muss die Host PC IP auf `127.0.0.1` stehen. Öffne dann TizenBrew → **grüne Taste** (Modulverwaltung) → Modul hinzufügen → **GitHub** → `DEINNAME/fernsurfer@1.0.1` eintragen.
+   - `@1.0.1` friert die Version ein. Wenn TizenBrew das Modul so nicht findet, trag `DEINNAME/fernsurfer` ohne Version ein.
 5. Starte **Fernsurfer** in TizenBrew.
 
 ## Testen am PC
@@ -74,6 +75,13 @@ python -m http.server 8765 --bind 127.0.0.1
 
 - `http://127.0.0.1:8765/test/filters.html`: Filter, Scriptlets, Ausnahmen, Netzwerk-Sperre
 - `http://127.0.0.1:8765/test/index.html`: Popups, Klick-Falle, Zeiger, fremder Player im iframe
+- `http://127.0.0.1:8765/test/csp.html`: Seite mit Content-Security-Policy und Autofokus (wie DuckDuckGo)
+- `http://127.0.0.1:8765/test/tizenbrew-ui/dist/index.html`: Nachbildung der TizenBrew-Oberfläche, dort darf Fernsurfer nichts tun
+
+## Änderungen
+
+- **1.0.1:** Zeiger, Adressleiste und Werbefilter funktionieren auf Seiten mit Content-Security-Policy (z. B. DuckDuckGo). Der Autofokus der Seite wird ignoriert, die Startseite öffnet direkt die Adressleiste. Fernsurfer erscheint nicht mehr in der TizenBrew-Oberfläche. Hoch am oberen Rand öffnet die Adressleiste.
+- **1.0.0:** erste Version.
 
 Pfeiltasten, Enter und Esc funktionieren wie die Fernbedienung.
 

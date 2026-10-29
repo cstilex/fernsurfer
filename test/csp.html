@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<!-- Wie DuckDuckGo: keine eingebetteten Stylesheets, keine Inline-Skripte -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+<title>Fernsurfer CSP-Test</title>
+<script src="userScript.test.js"></script>
+</head>
+<body>
+  <h1>CSP-Test (wie DuckDuckGo)</h1>
+  <form><input id="q" type="text" autofocus placeholder="Suchfeld mit autofocus"></form>
+  <div id="g" class="adsbygoogle-box">generisch: soll unsichtbar sein</div>
+  <div id="s" class="test-ad-specific">seitenspezifisch: soll unsichtbar sein</div>
+  <div id="ok">normaler Inhalt: soll sichtbar bleiben</div>
+  <div id="slot"></div>
+  <script src="csp-test.js"></script>
+</body>
+</html>

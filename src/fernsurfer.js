@@ -28,13 +28,20 @@
   function later(fn, ms) { return ST.call(W, fn, ms); }
   function every(fn, ms) { return SI.call(W, fn, ms); }
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.0.1';
   var FILTERS = /*@@FILTERS@@*/null;
   var HOME = 'https://html.duckduckgo.com/html/';
   var SEARCH = 'https://html.duckduckgo.com/html/?q=';
   var IS_TOP = W.top === W;
   var HOST = (location.hostname || '').toLowerCase();
   var OFF_KEY = 'fernsurfer:off';
+
+  // TizenBrew schleust das Modul in jede Seite seines Fensters ein - auch in die
+  // eigene Oberflaeche, wenn man den Browser verlaesst. Dort hat es nichts zu suchen.
+  if (!/^https?:$/.test(location.protocol) || /tizenbrew-ui/i.test(location.pathname) ||
+      ((HOST === '127.0.0.1' || HOST === 'localhost') && location.port === '8081')) {
+    return;
+  }
 
   var KEY = {
     LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, ENTER: 13,
@@ -58,6 +65,7 @@
   var lastMove = 0;
   var speed = 1;
   var toastTimer = null;
+  var userActed = false;  // erste Taste gedrueckt?
 
   var DISABLED = (function () {
     try { return W.localStorage.getItem(OFF_KEY) === '1'; } catch (e) { return false; }
@@ -550,16 +558,52 @@
       if (!unhide[sel[id]]) rules.push(sel[id]);
     });
 
+    var styled = collect(FILTERS.style).filter(function (pair) { return !unhide[pair[0]]; });
+
     // Jede Regel einzeln, damit ein Selektor, den Chromium 63 nicht kennt,
-    // nicht die ganze Gruppe ungueltig macht.
-    var css = rules.map(function (s) { return s + '{display:none!important}'; });
-    collect(FILTERS.style).forEach(function (pair) {
-      if (!unhide[pair[0]]) css.push(pair[0] + '{' + pair[1] + '!important}');
-    });
+    // nicht die ganze Gruppe ungueltig macht. "html{}" dient als Probe, ob die
+    // Seite eingebettete Stylesheets per Content-Security-Policy verbietet.
+    var css = ['html{}'].concat(rules.map(function (s) { return s + '{display:none!important}'; }));
+    styled.forEach(function (pair) { css.push(pair[0] + '{' + pair[1] + '!important}'); });
 
     var style = document.createElement('style');
     style.setAttribute('data-fernsurfer', 'filters');
     style.textContent = css.join('\n');
+
+    // Ersatzweg fuer Seiten mit CSP: Elemente direkt per Skript ausblenden.
+    // CSSOM-Aenderungen an element.style erlaubt die CSP weiterhin.
+    var jsMode = false;
+    var jsRules = rules.slice();
+    var jsTimer = null;
+
+    function declarations(text) {
+      return String(text).split(';').map(function (d) {
+        var k = d.indexOf(':');
+        return k > 0 ? [d.slice(0, k).trim(), d.slice(k + 1).replace(/!important/i, '').trim()] : null;
+      }).filter(Boolean);
+    }
+    var styledDecls = styled.map(function (pair) { return [pair[0], declarations(pair[1])]; });
+
+    function jsHide() {
+      jsTimer = null;
+      for (var k = 0; k < jsRules.length; k++) {
+        var els;
+        try { els = document.querySelectorAll(jsRules[k]); } catch (e) { jsRules.splice(k--, 1); continue; }
+        for (var n = 0; n < els.length; n++) {
+          if (els[n].style.getPropertyValue('display') !== 'none') els[n].style.setProperty('display', 'none', 'important');
+        }
+      }
+      styledDecls.forEach(function (pair) {
+        var els;
+        try { els = document.querySelectorAll(pair[0]); } catch (e) { return; }
+        for (var n = 0; n < els.length; n++) {
+          pair[1].forEach(function (d) { els[n].style.setProperty(d[0], d[1], 'important'); });
+        }
+      });
+    }
+    function scheduleJsHide() {
+      if (jsMode && !jsTimer) jsTimer = later(jsHide, 250);
+    }
 
     // Einfache generische Selektoren (.klasse, #id) nur anwenden, wenn sie auf
     // der Seite vorkommen - so macht es uBlock Origin auch; spart Rechenzeit.
@@ -588,9 +632,14 @@
     }
     function flush() {
       if (!found.length) return;
-      dyn.appendChild(document.createTextNode(found.map(function (s) {
-        return s + '{display:none!important}';
-      }).join('\n') + '\n'));
+      if (jsMode) {
+        jsRules = jsRules.concat(found);
+        scheduleJsHide();
+      } else {
+        dyn.appendChild(document.createTextNode(found.map(function (s) {
+          return s + '{display:none!important}';
+        }).join('\n') + '\n'));
+      }
       found = [];
     }
 
@@ -604,11 +653,24 @@
       flush();
     }
 
+    var probed = false;
     function attach() {
+      if (jsMode) return true;
       var parent = document.head || document.documentElement;
       if (!parent) return false;
       if (!style.parentNode) parent.appendChild(style);
       if (!dyn.parentNode) parent.appendChild(dyn);
+      if (!probed) {
+        probed = true;
+        var ok = false;
+        try { ok = !!style.sheet && style.sheet.cssRules.length > 0; } catch (e) {}
+        if (!ok) {
+          jsMode = true;
+          if (style.parentNode) style.parentNode.removeChild(style);
+          if (dyn.parentNode) dyn.parentNode.removeChild(dyn);
+          scheduleJsHide();
+        }
+      }
       return true;
     }
 
@@ -629,6 +691,7 @@
           else for (var n = 0; n < m.addedNodes.length; n++) queue.push(m.addedNodes[n]);
         }
         if (!timer && queue.length) timer = later(processQueue, 50);
+        scheduleJsHide();
       }).observe(document.documentElement, {
         childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'id']
       });
@@ -1020,31 +1083,46 @@
     }
   } catch (e) {}
 
-  var CSS = [
-    ':host{all:initial}',
-    '.cur{position:fixed;left:0;top:0;width:28px;height:28px;margin:-3px 0 0 -3px;pointer-events:none;',
-    'z-index:2147483647;transition:opacity .2s}',
-    '.cur svg{width:100%;height:100%;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}',
-    '.cur.off{opacity:0}',
-    '.toast{position:fixed;right:32px;bottom:32px;max-width:60%;padding:12px 20px;border-radius:10px;',
-    'background:rgba(20,20,24,.92);color:#fff;font:600 20px/1.3 sans-serif;pointer-events:none;',
-    'z-index:2147483647;opacity:0;transition:opacity .25s}',
-    '.toast.show{opacity:1}',
-    '.bar{position:fixed;left:0;right:0;top:0;display:none;align-items:center;padding:16px 24px;',
-    'background:rgba(20,20,24,.96);z-index:2147483647;font:20px sans-serif;color:#fff;',
-    'box-shadow:0 4px 16px rgba(0,0,0,.5)}',
-    '.bar.open{display:flex}',
-    '.bar input{flex:1;font:22px sans-serif;padding:10px 14px;border-radius:8px;border:2px solid #4a90e2;',
-    'background:#fff;color:#111;outline:none}',
-    '.hint{margin-left:16px;font-size:16px;color:#bbb;white-space:nowrap}',
-    '.menu{position:fixed;right:32px;top:32px;min-width:420px;display:none;padding:12px 0;border-radius:12px;',
-    'background:rgba(20,20,24,.96);color:#fff;font:20px/1.3 sans-serif;z-index:2147483647;',
-    'box-shadow:0 8px 24px rgba(0,0,0,.5)}',
-    '.menu.open{display:block}',
-    '.menu .title{padding:4px 24px 12px;font-size:16px;color:#bbb}',
-    '.menu .item{padding:12px 24px}',
-    '.menu .item.sel{background:#4a90e2}'
-  ].join('');
+  // Kein <style>-Element: Seiten wie DuckDuckGo verbieten eingebettete Stylesheets
+  // per Content-Security-Policy. Stile direkt am Element (CSSOM) bleiben erlaubt.
+  var TOP_Z = '2147483647';
+  var STYLE = {
+    cursor: {
+      position: 'fixed', left: '0', top: '0', width: '28px', height: '28px', margin: '-3px 0 0 -3px',
+      'pointer-events': 'none', 'z-index': TOP_Z, transition: 'opacity .2s', display: 'block'
+    },
+    svg: { width: '100%', height: '100%', display: 'block', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.6))' },
+    toast: {
+      position: 'fixed', right: '32px', bottom: '32px', 'max-width': '60%', padding: '12px 20px',
+      'border-radius': '10px', background: 'rgba(20,20,24,.92)', color: '#fff',
+      font: '600 20px/1.3 sans-serif', 'pointer-events': 'none', 'z-index': TOP_Z, opacity: '0',
+      transition: 'opacity .25s'
+    },
+    bar: {
+      position: 'fixed', left: '0', right: '0', top: '0', display: 'none', 'align-items': 'center',
+      padding: '16px 24px', background: 'rgba(20,20,24,.96)', 'z-index': TOP_Z, font: '20px sans-serif',
+      color: '#fff', 'box-shadow': '0 4px 16px rgba(0,0,0,.5)', 'box-sizing': 'border-box'
+    },
+    input: {
+      flex: '1', 'min-width': '0', font: '22px sans-serif', padding: '10px 14px', 'border-radius': '8px',
+      border: '2px solid #4a90e2', background: '#fff', color: '#111', outline: 'none'
+    },
+    hint: { 'margin-left': '16px', 'font-size': '16px', color: '#bbb', 'white-space': 'nowrap' },
+    menu: {
+      position: 'fixed', right: '32px', top: '32px', 'min-width': '420px', display: 'none', padding: '12px 0',
+      'border-radius': '12px', background: 'rgba(20,20,24,.96)', color: '#fff', font: '20px/1.3 sans-serif',
+      'z-index': TOP_Z, 'box-shadow': '0 8px 24px rgba(0,0,0,.5)'
+    },
+    title: { padding: '4px 24px 12px', 'font-size': '16px', color: '#bbb' },
+    item: { padding: '12px 24px' }
+  };
+
+  function css(el, props) {
+    for (var k in props) {
+      if (Object.prototype.hasOwnProperty.call(props, k)) el.style.setProperty(k, props[k], 'important');
+    }
+    return el;
+  }
 
   var CURSOR_SVG = '<svg viewBox="0 0 24 24"><path d="M3 2l17 10-7.5 1.6L9 21z" fill="#fff" stroke="#111" ' +
     'stroke-width="1.5" stroke-linejoin="round"/></svg>';
@@ -1066,42 +1144,35 @@
     host.style.cssText = 'all:initial !important;display:block !important;position:fixed !important;' +
       'left:0 !important;top:0 !important;width:0 !important;height:0 !important;z-index:2147483647 !important;';
     var root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : host;
-    var style = document.createElement('style');
-    style.textContent = CSS;
-    root.appendChild(style);
 
-    var cursor = document.createElement('div');
-    cursor.className = 'cur';
+    var cursor = css(document.createElement('div'), STYLE.cursor);
     cursor.innerHTML = CURSOR_SVG;
+    if (cursor.firstChild) css(cursor.firstChild, STYLE.svg);
     root.appendChild(cursor);
 
-    var t = document.createElement('div');
-    t.className = 'toast';
+    var t = css(document.createElement('div'), STYLE.toast);
     root.appendChild(t);
 
-    var bar = document.createElement('div');
-    bar.className = 'bar';
-    var input = document.createElement('input');
+    var bar = css(document.createElement('div'), STYLE.bar);
+    var input = css(document.createElement('input'), STYLE.input);
     input.type = 'text';
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('spellcheck', 'false');
     input.placeholder = 'Adresse oder Suchbegriff';
-    var hint = document.createElement('span');
-    hint.className = 'hint';
+    var hint = css(document.createElement('span'), STYLE.hint);
     hint.textContent = 'OK = Los   Zurueck = Schliessen';
     bar.appendChild(input);
     bar.appendChild(hint);
     root.appendChild(bar);
 
-    var menuEl = document.createElement('div');
-    menuEl.className = 'menu';
+    var menuEl = css(document.createElement('div'), STYLE.menu);
     root.appendChild(menuEl);
 
     on(input, 'keydown', function (ev) {
       if (ev.keyCode === KEY.ENTER) {
         ev.preventDefault();
         go(input.value);
-      } else if (ev.keyCode === KEY.BACK || ev.keyCode === KEY.ESC) {
+      } else if (ev.keyCode === KEY.BACK || ev.keyCode === KEY.ESC || ev.keyCode === KEY.DOWN) {
         ev.preventDefault();
         closeBar();
       }
@@ -1124,16 +1195,18 @@
     if (!ui) buildUi();
     if (!ui) return;
     ui.toast.textContent = text;
-    ui.toast.className = 'toast show';
+    css(ui.toast, { opacity: '1' });
     clearTimeout(toastTimer);
-    toastTimer = later(function () { ui.toast.className = 'toast'; }, 2200);
+    toastTimer = later(function () { css(ui.toast, { opacity: '0' }); }, 2200);
   }
 
   function drawCursor() {
     if (!ui) return;
     ensureCursorPos();
-    ui.cursor.style.transform = 'translate(' + Math.round(cx) + 'px,' + Math.round(cy) + 'px)';
-    ui.cursor.className = cursorOn ? 'cur' : 'cur off';
+    css(ui.cursor, {
+      transform: 'translate(' + Math.round(cx) + 'px,' + Math.round(cy) + 'px)',
+      opacity: cursorOn ? '1' : '0'
+    });
   }
 
   function scrollableParent(el, dx, dy) {
@@ -1157,6 +1230,7 @@
     lastMove = now;
     var step = Math.max(8, Math.round(W.innerWidth / 110)) * speed;
     var margin = 4;
+    var wasAtTop = cy <= margin;
     var nx = cx + dx * step;
     var ny = cy + dy * step;
 
@@ -1171,6 +1245,12 @@
     if (sx || sy) {
       var amount = Math.round(W.innerHeight / 6);
       var target = scrollableParent(document.elementFromPoint(cx, cy), sx, sy);
+      // Schon oben am Rand und die Seite ist ganz oben: weiter nach oben = Adressleiste
+      if (sy < 0 && !sx && wasAtTop && !target && W.scrollY <= 0) {
+        drawCursor();
+        openBar();
+        return;
+      }
       var bx = sx ? (sx > 0 ? amount : -amount) : 0;
       var by = sy ? (sy > 0 ? amount : -amount) : 0;
       if (target) target.scrollBy(bx, by);
@@ -1195,7 +1275,7 @@
     buildUi();
     if (!ui) return;
     barOpen = true;
-    ui.bar.className = 'bar open';
+    css(ui.bar, { display: 'flex' });
     ui.input.value = /^https?:/.test(location.href) && location.href.indexOf(HOME) !== 0 ? location.href : '';
     later(function () { ui.input.focus(); ui.input.select(); }, 0);
   }
@@ -1203,7 +1283,7 @@
   function closeBar() {
     if (!ui) return;
     barOpen = false;
-    ui.bar.className = 'bar';
+    css(ui.bar, { display: 'none' });
     ui.input.blur();
   }
 
@@ -1239,23 +1319,22 @@
   function renderMenu() {
     var el = ui.menu;
     el.textContent = '';
-    var title = document.createElement('div');
-    title.className = 'title';
+    var title = css(document.createElement('div'), STYLE.title);
     title.textContent = 'Fernsurfer ' + VERSION + ' - ' + (HOST || 'Seite') + ' - ' +
       (DISABLED ? 'Werbeblocker AUS' : stats.popups + ' Popups, ' + stats.net + ' Anfragen blockiert');
     el.appendChild(title);
     menu.items.forEach(function (it, i) {
-      var row = document.createElement('div');
-      row.className = i === menu.index ? 'item sel' : 'item';
+      var row = css(document.createElement('div'), STYLE.item);
+      css(row, { background: i === menu.index ? '#4a90e2' : 'transparent' });
       row.textContent = it.label;
       el.appendChild(row);
     });
-    el.className = 'menu open';
+    css(el, { display: 'block' });
   }
 
   function closeMenu() {
     menu = null;
-    if (ui) ui.menu.className = 'menu';
+    if (ui) css(ui.menu, { display: 'none' });
   }
 
   function menuKey(code) {
@@ -1326,9 +1405,45 @@
   }
 
   on(W, 'keydown', function (ev) {
+    userActed = true;
     if (!ui) buildUi();
     handleKey(ev.keyCode, ev);
   }, true);
+
+  // Zeiger aus: "nach oben" am Seitenanfang fuehrt in die Adressleiste. Dieser
+  // Listener laeuft als letzter (Bubble-Phase am window), die Seite hatte also
+  // schon die Chance, die Taste selbst zu verwenden.
+  on(W, 'keydown', function (ev) {
+    if (cursorOn || barOpen || menu || ev.keyCode !== KEY.UP || ev.defaultPrevented) return;
+    if (W.scrollY > 0) return;
+    var ae = document.activeElement;
+    if (isEditable(ae)) return;
+    if (ae && ae !== document.body && ae !== document.documentElement) {
+      var r = ae.getBoundingClientRect();
+      if (r.top > W.innerHeight * 0.2) return;
+    }
+    ev.preventDefault();
+    openBar();
+  }, false);
+
+  // Seiten wie DuckDuckGo setzen per "autofocus" den Fokus in ihr Suchfeld; dann
+  // landen die Pfeiltasten dort statt beim Zeiger. Vor der ersten Taste loesen.
+  function dropAutofocus() {
+    if (userActed || barOpen) return;
+    var ae = document.activeElement;
+    if (ae && ae !== document.body && isEditable(ae)) ae.blur();
+  }
+  // Chromium setzt "autofocus" teils erst, wenn die Seite sichtbar wird - also
+  // jeden Fokus abfangen, der vor der ersten Taste in ein Eingabefeld springt.
+  // (Fokus in unserer eigenen Adressleiste kommt hier als Host-Element an.)
+  on(W, 'focusin', function (ev) {
+    if (userActed || barOpen) return;
+    if (isEditable(ev.target)) { try { ev.target.blur(); } catch (e) {} }
+  }, true);
+
+  function isHomePage() {
+    return location.href.indexOf(HOME) === 0 && !!document.getElementById('search_form_input_homepage');
+  }
 
   on(W, 'resize', function () {
     ensureCursorPos();
@@ -1337,5 +1452,12 @@
     drawCursor();
   });
 
-  onReady(buildUi);
+  onReady(function () {
+    buildUi();
+    dropAutofocus();
+    later(dropAutofocus, 300);
+    // Auf der Startseite gleich in die eigene Adressleiste
+    if (isHomePage() && !userActed) openBar();
+  });
+  on(W, 'load', dropAutofocus);
 })();
