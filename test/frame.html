@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Fremder Player</title>
+<script src="../dist/userScript.js"></script>
+<style>
+  body { font: 16px sans-serif; margin: 12px; }
+  button { padding: 12px 20px; font-size: 18px; margin-right: 12px; }
+</style>
+</head>
+<body>
+  <b>Fremder Player (andere Origin)</b><br><br>
+  <button id="fplay">Play im iframe</button>
+  <button id="fpop">Werbe-Popup im iframe</button>
+<script>
+  function report(t) { parent.postMessage({ test: t }, '*'); }
+  document.getElementById('fplay').addEventListener('click', function () { report('play'); });
+  document.getElementById('fpop').addEventListener('click', function () {
+    var w = window.open('https://ads.example.net/frame', '_blank');
+    var real = !!w && w.document && typeof w.document.createElement === 'function';
+    if (real) { try { w.close(); } catch (e) {} }
+    report(real ? 'POPUP GEOEFFNET' : 'popup blockiert');
+  });
+</script>
+</body>
+</html>

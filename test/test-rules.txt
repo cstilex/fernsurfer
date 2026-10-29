@@ -1,0 +1,12 @@
+! Testregeln fuer test/index.html (nur fuer den Test-Build)
+127.0.0.1##.test-ad-specific
+##.test-unhide
+127.0.0.1#@#.test-unhide
+127.0.0.1##.styled-test:style(color: rgb(255, 0, 0))
+127.0.0.1##div.test-complex > span.inner
+127.0.0.1##+js(set, testAdFlag, true)
+127.0.0.1##+js(aopr, adBlockDetector)
+127.0.0.1##+js(nostif, adTimer)
+127.0.0.1##+js(json-prune, ads)
+127.0.0.1##+js(aeld, test-evt, adHandler)
+||ads-test.invalid^
