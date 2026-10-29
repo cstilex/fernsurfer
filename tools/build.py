@@ -1,7 +1,11 @@
 """
 Baut dist/userScript.js aus src/fernsurfer.js und Filterlisten im Adblock-Format.
 
-    python -I tools/build.py LISTE.txt [LISTE.txt ...] [--out dist/userScript.js] [--net]
+    python -I tools/build.py LISTE.txt [LISTE.txt ...] [--out dist/userScript.js] [--net] [--start URL]
+
+--start URL setzt die Adresse der Favoriten-Startseite (start.html ueber GitHub Pages,
+z. B. https://NAME.github.io/fernsurfer/start.html) und traegt sie als websiteURL in
+package.json ein.
 
 Uebernommen werden:
   - kosmetische Filter (##, #@#) inkl. :style() und :remove()
@@ -250,6 +254,7 @@ def main(argv):
     out = ROOT / "dist" / "userScript.js"
     lists = []
     with_net = False
+    start_url = None
     i = 0
     while i < len(argv):
         if argv[i] == "--out":
@@ -259,6 +264,10 @@ def main(argv):
         if argv[i] == "--net":
             with_net = True
             i += 1
+            continue
+        if argv[i] == "--start":
+            start_url = argv[i + 1]
+            i += 2
             continue
         lists.append(Path(argv[i]))
         i += 1
@@ -280,8 +289,19 @@ def main(argv):
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Kein '</script>' und keine Zeilentrenner, die alte JS-Engines stoeren
     payload = payload.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    src = src.replace(PLACEHOLDER, payload)
+    if start_url:
+        if not re.match(r"^https?://[^\s'\"\\]+$", start_url):
+            print("Ungueltige --start-Adresse:", start_url)
+            return 1
+        src = re.sub(r"/\*@@START@@\*/'[^']*'", lambda m: json.dumps(start_url), src, count=1)
+        if out == ROOT / "dist" / "userScript.js":
+            pkg_path = ROOT / "package.json"
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+            pkg["websiteURL"] = start_url
+            pkg_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(src.replace(PLACEHOLDER, payload), encoding="utf-8")
+    out.write_text(src, encoding="utf-8")
 
     print("Ausgabe:            ", out)
     print("Groesse:             %.0f KB" % (out.stat().st_size / 1024))

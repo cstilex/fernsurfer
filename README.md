@@ -7,23 +7,62 @@ Geschrieben für Tizen 5.0 (Chromium 63).
 - **Quelltext:** [`src/fernsurfer.js`](src/fernsurfer.js), lesbar und ohne Abhängigkeiten. [`dist/userScript.js`](dist/userScript.js) ist dieselbe Datei plus Filterdaten, erzeugt von [`tools/build.py`](tools/build.py).
 - **Keine Befehle über die Webadresse:** Webseiten können das Modul nicht fernsteuern.
 
+## Installation
+
+Fernsurfer ist ein Modul für [TizenBrew](https://github.com/reisxd/TizenBrew). Wie du TizenBrew auf deinen Fernseher bekommst, steht in der [TizenBrew-Anleitung](https://github.com/reisxd/TizenBrew/blob/main/docs/README.md). Danach installierst du Fernsurfer wie jedes andere TizenBrew-Modul:
+
+1. TizenBrew öffnen → **grüne Taste** (Modulverwaltung) → Modul hinzufügen → **GitHub**.
+2. `BENUTZER/fernsurfer` eintragen. Das ist der Name dieses Repositorys, wie er oben auf dieser Seite steht.
+3. **Fernsurfer** in der Modulliste auswählen.
+
+Neue Versionen kommen von selbst an. Starte den Fernseher danach einmal neu.
+
 ## So läuft es ab
 
-TizenBrew → **Fernsurfer** auswählen → die Startseite (DuckDuckGo) öffnet sich im Vollbild. Ab dann läuft Fernsurfer auf jeder Seite, die du ansurfst, auch in eingebetteten Playern. Beenden kannst du es mit der Home-Taste.
+TizenBrew → **Fernsurfer** auswählen → die **Startseite mit deinen Favoriten** öffnet sich im Vollbild. Ab dann läuft Fernsurfer auf jeder Seite, die du ansurfst, auch in eingebetteten Playern. Beenden kannst du es mit der Home-Taste.
+
+Rechts auf dem Bildschirm zeigt eine **Tastenhilfe**, was welche Taste macht. Mit der **INFO-Taste** oder über **Blau → Tastenhilfe** blendest du sie aus und wieder ein. Solange ein Video läuft oder etwas im Vollbild ist, verschwindet sie von selbst und kommt beim Pausieren wieder. Stumme Hintergrund- und Vorschauvideos, die Seiten von selbst abspielen, zählen dabei nicht.
+
+## Startseite und Favoriten
+
+- Die Startseite ist `https://html.duckduckgo.com/html/?fernsurfer`. Das Merkmal `?fernsurfer` erkennt Fernsurfer und legt seine eigene Oberfläche über die Seite: nur Suchfeld und Favoriten als Kacheln. Normale DuckDuckGo-Suchen bleiben davon unberührt.
+- Pfeiltasten wählen eine Kachel, OK öffnet sie. Ganz oben ist das Suchfeld.
+- **Favorit speichern:** auf einer Seite Rot drücken (Adressleiste) → mit → zum Knopf **★ Favorit** → OK. Es erscheint eine Nachfrage auf der Startseite, danach geht es zurück zur Seite. Alternativ geht das über Blau → „Zu Favoriten hinzufügen“.
+- **Favorit entfernen:** auf der Startseite die Kachel wählen → Blau → „Favorit entfernen“.
+- Die Favoriten liegen im Speicher dieser Seite (localStorage von `html.duckduckgo.com`) auf dem Fernseher. Die Symbole der Kacheln kommen vom Symbol-Dienst `icons.duckduckgo.com`. Andere Bildquellen erlaubt DuckDuckGo auf seiner Seite nicht. DuckDuckGo erfährt dadurch, welche Domains in deinen Favoriten stehen.
 
 ## Tasten
 
 | Taste | Funktion |
 |---|---|
-| Pfeiltasten | Zeiger bewegen (gedrückt halten = schneller, am Rand wird gescrollt) |
-| Hoch am oberen Rand | Adressleiste (auch bei ausgeschaltetem Zeiger, wenn die Seite ganz oben ist); Runter schließt sie |
-| OK | Klicken (Textfelder öffnen die TV-Tastatur) |
-| Zurück | Vorherige Seite bzw. Textfeld oder Menü verlassen |
-| Rot | Adressleiste: Adresse oder Suchbegriff |
-| Grün | Zeiger an/aus (aus = die Seite bekommt die Pfeiltasten selbst) |
-| Gelb | Startseite |
-| Blau | Menü: neu laden, **Werbeblocker auf dieser Seite aus/an**, Statistik |
-| Play/Pause, Stop, Spulen | Steuern das Video auf der Seite (±10 s) |
+| Pfeiltasten | **Link-Modus** (Standard): zum nächsten anklickbaren Element in dieser Richtung springen. **Freier Zeiger:** Zeiger bewegen (gedrückt halten = schneller). Auf der Startseite: Kachel wählen |
+| Hoch ganz oben | Adressleiste (in jedem Modus, wenn die Seite ganz oben ist); Runter schließt sie |
+| OK | Gewähltes Element anklicken (Textfelder öffnen die TV-Tastatur); auf einem eingebetteten Player: Video starten und hineingehen |
+| Zurück | Beendet das Vollbild, verlässt einen Player, Textfelder und Menüs, sonst vorherige Seite |
+| Rot | Adressleiste: Adresse oder Suchbegriff, mit den Knöpfen **▶ Öffnen** und **★ Favorit** (mit → erreichbar) |
+| Grün | Wechselt zwischen **Link-Modus** und **freiem Zeiger** (die Wahl bleibt gespeichert) |
+| Gelb | Startseite (Favoriten) |
+| Blau | Menü: Video als Vollbild, Favorit hinzufügen, Tastenhilfe, Zeiger aus/an, neu laden, **Werbeblocker auf dieser Seite aus/an** |
+| INFO | Tastenhilfe aus- und einblenden |
+| Play/Pause, Stop, Spulen | Steuern das laufende Video (±10 s), auch in eingebetteten Playern |
+| Im Vollbild | ← → spulen ±10 s, OK = Play/Pause, Zurück beendet das Vollbild |
+
+## Link-Modus
+
+Wie im Link-Modus des Samsung-Browsers springen die Pfeiltasten von Element zu Element. Das gewählte Element bekommt einen blauen Rahmen.
+
+- **Ziele** sind Links, Knöpfe, Eingabefelder, Videos und eingebettete Player, außerdem Elemente, die die Seite als anklickbar kennzeichnet (Rolle „Button“, „Hand“-Mauszeiger, Klick-Funktion). Verdeckte Elemente, etwa hinter einem Dialog, werden übersprungen.
+- Gesprungen wird zum nächsten Ziel in der gedrückten Richtung, bevorzugt in derselben Zeile bzw. Spalte.
+- Liegt das nächste Ziel außerhalb des Bildschirms, scrollt die Seite zuerst ein Stück. So wird längerer Text dazwischen nicht übersprungen.
+- **Video auf der Seite:** Das Videobild ist ein eigenes Ziel (OK = Play/Pause). Runter führt zu den Knöpfen des Players, Hoch zurück zum Video. Damit die Knöpfe sichtbar bleiben, simuliert Fernsurfer Mausbewegungen.
+- **Eingebetteter Player (iframe):** Von außen ist der Player ein einziges Ziel. OK startet das Video und geht hinein, danach springen die Pfeiltasten zwischen den Knöpfen im Player. Zurück oder ein Sprung über den Rand hinaus verlässt ihn wieder.
+- Bei Playern, deren Knöpfe nicht als Elemente erkennbar sind, hilft **Grün** (freier Zeiger). Die Play-, Pause- und Spultasten funktionieren immer.
+
+## Videoplayer
+
+- Liegt eine unsichtbare Klick-Schicht über dem Player, die beim Klick ein Popup öffnen will, räumt Fernsurfer sie beim ersten OK weg und reicht den Klick an den Player durch.
+- Reagiert ein Player nicht auf OK, startet Fernsurfer das Video direkt.
+- Ein Vollbild-Knopf, der in TizenBrew nichts tut, legt das Video bzw. den eingebetteten Player stattdessen über den ganzen Bildschirm. **Zurück** beendet das.
 
 ## Was der Werbefilter kann
 
@@ -42,7 +81,9 @@ Eingebaut sind **EasyList**, **EasyList Germany** und **uBlock filters**, die dr
 
 **Zeitpunkt:** TizenBrew schleust das Modul ein, sobald eine Seite entsteht. Scriptlets greifen deshalb meistens, aber nicht garantiert vor den Skripten der Seite.
 
-## Filterlisten aktualisieren
+## Für Entwickler
+
+### Filterlisten aktualisieren
 
 Die Listen werden beim Bauen eingebettet. Lade sie neu herunter und bau dann neu:
 
@@ -50,28 +91,25 @@ Die Listen werden beim Bauen eingebettet. Lade sie neu herunter und bau dann neu
 python -I tools/build.py easylist.txt easylistgermany.txt ublock-filters.txt
 ```
 
+Optional setzt `--start URL` eine andere Startseite in das Modul und in `package.json` (`websiteURL`) ein.
+
 Quellen:
 - https://easylist.to/easylist/easylist.txt
 - https://easylist.to/easylistgermany/easylistgermany.txt
 - https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt
 
-Danach erhöhst du `version` in `package.json` und erstellst einen neuen Tag.
+Danach erhöhst du `version` in `package.json` und lädst die geänderten Dateien hoch. TizenBrew holt sie über jsDelivr, das einige Stunden zwischenspeichert.
 
-## Installation
-
-1. Leg auf GitHub ein **öffentliches** Repository an, zum Beispiel `fernsurfer`.
-2. Lade alles hoch außer `test/userScript.test.js` (siehe `.gitignore`).
-3. Erstell ein Release bzw. einen Tag `1.0.1`.
-4. Am Fernseher muss die Host PC IP auf `127.0.0.1` stehen. Öffne dann TizenBrew → **grüne Taste** (Modulverwaltung) → Modul hinzufügen → **GitHub** → `DEINNAME/fernsurfer@1.0.1` eintragen.
-   - `@1.0.1` friert die Version ein. Wenn TizenBrew das Modul so nicht findet, trag `DEINNAME/fernsurfer` ohne Version ein.
-5. Starte **Fernsurfer** in TizenBrew.
-
-## Testen am PC
+### Testen am PC
 
 ```
-python -I tools/build.py LISTEN... test/test-rules.txt --net --out test/userScript.test.js
+python -I tools/build.py LISTEN... test/test-rules.txt --net --start "http://127.0.0.1:8765/test/start.html?fernsurfer" --out test/userScript.test.js
 python -m http.server 8765 --bind 127.0.0.1
 ```
+
+- `http://127.0.0.1:8765/test/start.html?fernsurfer`: Favoriten-Startseite (mit Sicherheitsregel wie bei DuckDuckGo)
+- `http://127.0.0.1:8765/test/video.html`: Videoplayer mit Klick-Schicht und Vollbild-Knopf, direkt und im fremden iframe
+- `http://127.0.0.1:8765/test/jump.html`: Link-Modus (Zeilen, Kacheln ohne Kennzeichnung, langer Text, Player mit Knöpfen, eingebetteter Player)
 
 - `http://127.0.0.1:8765/test/filters.html`: Filter, Scriptlets, Ausnahmen, Netzwerk-Sperre
 - `http://127.0.0.1:8765/test/index.html`: Popups, Klick-Falle, Zeiger, fremder Player im iframe
@@ -80,10 +118,10 @@ python -m http.server 8765 --bind 127.0.0.1
 
 ## Änderungen
 
+- **1.2.0:** Link-Modus wie im Samsung-Browser (Standard). Grün wechselt zum freien Zeiger. Eingebettete Player lassen sich betreten und verlassen, im Vollbild spulen ← →, OK pausiert. Zeiger aus/an über das Menü.
+- **1.1.0:** Favoriten-Startseite (auf DuckDuckGo) mit Kacheln und ★-Knopf in der Adressleiste. Adressleiste mit Knopf **▶ Öffnen**; „Fertig“ auf der TV-Tastatur öffnet die Adresse. Tastenhilfe rechts (INFO-Taste), die bei laufendem Video und im Vollbild verschwindet. Videoplayer: Klick-Schichten werden weggeräumt, Video startet per OK, eigenes Vollbild; Play/Pause trifft das laufende Video, auch in eingebetteten Playern.
 - **1.0.1:** Zeiger, Adressleiste und Werbefilter funktionieren auf Seiten mit Content-Security-Policy (z. B. DuckDuckGo). Der Autofokus der Seite wird ignoriert, die Startseite öffnet direkt die Adressleiste. Fernsurfer erscheint nicht mehr in der TizenBrew-Oberfläche. Hoch am oberen Rand öffnet die Adressleiste.
 - **1.0.0:** erste Version.
-
-Pfeiltasten, Enter und Esc funktionieren wie die Fernbedienung.
 
 ## Lizenzen
 

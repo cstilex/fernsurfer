@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Fernsurfer Link-Modus-Test</title>
+<script src="userScript.test.js"></script>
+<style>
+  body { font: 16px sans-serif; margin: 20px 40px; }
+  nav a { display: inline-block; margin-right: 24px; padding: 8px; }
+  .cards { display: flex; flex-wrap: wrap; width: 720px; }
+  .card { width: 200px; height: 80px; margin: 0 20px 20px 0; background: #eef; cursor: pointer; padding: 8px; box-sizing: border-box; }
+  .card span { font-weight: bold; }
+  .long { height: 1600px; background: linear-gradient(#fff, #ddd); padding: 10px; }
+  .player { position: relative; width: 480px; height: 270px; background: #000; margin-top: 20px; }
+  .player video { width: 100%; height: 100%; display: block; }
+  .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: rgba(0,0,0,.5); }
+  .pbar button { position: absolute; top: 4px; height: 28px; }
+  iframe { width: 480px; height: 300px; border: 2px solid #888; display: block; margin-top: 20px; }
+</style>
+</head>
+<body>
+  <nav><a id="n1" href="#a">Start</a><a id="n2" href="#b">Nachrichten</a><a id="n3" href="#c">Sport</a><a id="n4" href="#d">Wetter</a></nav>
+  <div class="cards">
+    <div class="card" id="c1"><span>Kachel 1</span><br>nur Hand-Zeiger</div>
+    <div class="card" id="c2"><span>Kachel 2</span></div>
+    <div class="card" id="c3"><span>Kachel 3</span></div>
+    <div class="card" id="c4"><span>Kachel 4</span></div>
+    <div class="card" id="c5"><span>Kachel 5</span></div>
+    <div class="card" id="c6"><span>Kachel 6</span></div>
+  </div>
+  <input id="field" type="text" placeholder="Suchfeld">
+  <div class="long">Langer Text ohne Links ...</div>
+  <button id="far">Weiter (weit unten)</button>
+  <div class="player" id="p1">
+    <video id="v1" muted playsinline></video>
+    <div class="pbar"><button id="pp1" style="left:6px"><svg width="14" height="14"><path d="M2 1l10 6-10 6z"/></svg></button>
+      <button id="fs1" class="vjs-fullscreen-control" style="right:6px" title="Fullscreen"><svg width="14" height="14"><rect x="1" y="1" width="12" height="12" fill="none" stroke="#000"/></svg></button></div>
+  </div>
+  <iframe id="pf" src="http://localhost:8765/test/video-frame.html"></iframe>
+  <p><a id="last" href="#e">Letzter Link</a></p>
+  <script src="jump-test.js"></script>
+</body>
+</html>

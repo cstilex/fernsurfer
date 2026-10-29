@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Fernsurfer Videotest</title>
+<script src="userScript.test.js"></script>
+<style>
+  body { font: 16px sans-serif; margin: 20px; }
+  .player { position: relative; width: 480px; height: 270px; background: #000; display: inline-block; vertical-align: top; }
+  .player video { width: 100%; height: 100%; display: block; }
+  /* Unsichtbare Klick-Schicht, die bei jedem Klick ein Popup oeffnen will */
+  .clickjack { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: rgba(0,0,0,.5); }
+  .bar button { position: absolute; top: 4px; height: 28px; }
+  .bar .playpause { left: 6px; }
+  .bar .vjs-fullscreen-control { right: 6px; }
+  iframe { width: 480px; height: 300px; border: 2px solid #888; vertical-align: top; margin-left: 16px; }
+</style>
+</head>
+<body>
+  <h1>Videotest</h1>
+  <div class="player" id="p1">
+    <video id="v1" muted playsinline></video>
+    <div class="clickjack" id="cj1"></div>
+    <div class="bar"><button class="playpause" id="pp1"><svg width="14" height="14"><path d="M2 1l10 6-10 6z"/></svg></button>
+      <button class="vjs-fullscreen-control" id="fs1" title="Fullscreen"><svg width="14" height="14"><rect x="1" y="1" width="12" height="12" fill="none" stroke="#000"/></svg></button></div>
+  </div>
+  <iframe id="pf" src="http://localhost:8765/test/video-frame.html"></iframe>
+  <script src="video-test.js"></script>
+</body>
+</html>
