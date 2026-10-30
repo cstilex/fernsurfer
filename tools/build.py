@@ -3,8 +3,8 @@ Baut dist/userScript.js aus src/fernsurfer.js und Filterlisten im Adblock-Format
 
     python -I tools/build.py LISTE.txt [LISTE.txt ...] [--out dist/userScript.js] [--net] [--start URL]
 
---start URL setzt die Adresse der Favoriten-Startseite (start.html ueber GitHub Pages,
-z. B. https://NAME.github.io/fernsurfer/start.html) und traegt sie als websiteURL in
+--start URL setzt eine andere Adresse fuer die Favoriten-Startseite (Standard:
+https://html.duckduckgo.com/html/?fernsurfer) und traegt sie als websiteURL in
 package.json ein.
 
 Uebernommen werden:
@@ -301,9 +301,11 @@ def main(argv):
             pkg_path = ROOT / "package.json"
             pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
             pkg["websiteURL"] = start_url
-            pkg_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            pkg_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(src, encoding="utf-8")
+    # Immer Linux-Zeilenenden: Unter Windows und in der GitHub Action (Linux) entsteht so
+    # dieselbe Datei, sonst saehe die Action nach jedem Hochladen jede Zeile als geaendert.
+    out.write_text(src, encoding="utf-8", newline="\n")
 
     print("Ausgabe:            ", out)
     print("Groesse:             %.0f KB" % (out.stat().st_size / 1024))
