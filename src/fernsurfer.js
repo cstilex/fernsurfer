@@ -28,7 +28,7 @@
   function later(fn, ms) { return ST.call(W, fn, ms); }
   function every(fn, ms) { return SI.call(W, fn, ms); }
 
-  var VERSION = '1.3.1';
+  var VERSION = '1.3.3';
   var FILTERS = /*@@FILTERS@@*/null;
   var SEARCH = 'https://html.duckduckgo.com/html/?q=';
   // Startseite mit den Favoriten: die DuckDuckGo-HTML-Seite mit dem Merkmal
@@ -1017,10 +1017,22 @@
   }
 
   function fire(el, type, x, y, Ctor) {
+    var down = type.indexOf('down') >= 0;
     var init = {
-      bubbles: true, cancelable: true, view: W,
-      clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons: type.indexOf('down') >= 0 ? 1 : 0
+      bubbles: true, cancelable: true, composed: true, view: W,
+      clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons: down ? 1 : 0,
+      // Wie eine echte Maus: Manche Seiten (z. B. ZDF) halten Klicks ohne Zeigertyp
+      // und Klickzaehler fuer "virtuell" und ignorieren sie
+      detail: /^(click|mousedown|mouseup)$/.test(type) ? 1 : 0
     };
+    if (type.indexOf('pointer') === 0) {
+      init.pointerId = 1;
+      init.pointerType = 'mouse';
+      init.isPrimary = true;
+      init.width = 1;
+      init.height = 1;
+      init.pressure = down ? 0.5 : 0;
+    }
     var event;
     try {
       event = new (Ctor || MouseEvent)(type, init);
@@ -1220,12 +1232,20 @@
     var el = document.elementFromPoint(x, y);
     if (!el) return;
     if (el.tagName === 'IFRAME' && knownFrames.indexOf(el.contentWindow) >= 0) forwardToFrame(el, 'hover', x, y);
+    // Neuere Player blenden ihre Leiste nur bei Zeiger-Ereignissen ein
+    var P = W.PointerEvent;
     if (el !== lastHover) {
-      if (lastHover) { fire(lastHover, 'mouseout', x, y); fire(lastHover, 'mouseleave', x, y); }
+      if (lastHover) {
+        if (P) fire(lastHover, 'pointerout', x, y, P);
+        fire(lastHover, 'mouseout', x, y);
+        fire(lastHover, 'mouseleave', x, y);
+      }
+      if (P) fire(el, 'pointerover', x, y, P);
       fire(el, 'mouseover', x, y);
       fire(el, 'mouseenter', x, y);
       lastHover = el;
     }
+    if (P) fire(el, 'pointermove', x, y, P);
     fire(el, 'mousemove', x, y);
   }
 
@@ -1355,8 +1375,28 @@
   var DIRS = ['up', 'down', 'left', 'right'];
   var jumpSel = null;     // ausgewaehltes Element in diesem Frame
   var frameJump = false;  // (nur im iframe) wird gerade vom Elternfenster gesteuert
+  var lastPlayers = [];   // Player, die jumpTargets zuletzt gefunden hat
 
   function centerOf(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  // Flaeche eines Ziels. Ein Link ist oft ein Inline-Element, das laut Browser nur
+  // eine Textzeile hoch ist, obwohl ein grosses Bild darin steckt - das zaehlt mit.
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    var d = W.getComputedStyle(el).display;
+    if (d !== 'inline' && d !== 'contents') return r;
+    var empty = r.width === 0 && r.height === 0;
+    var left = empty ? Infinity : r.left, top = empty ? Infinity : r.top;
+    var right = empty ? -Infinity : r.right, bottom = empty ? -Infinity : r.bottom;
+    var kids = el.querySelectorAll('img,svg,video,picture,canvas,div,span');
+    for (var i = 0; i < kids.length && i < 20; i++) {
+      var k = kids[i].getBoundingClientRect();
+      if (k.width < 2 || k.height < 2) continue;
+      left = Math.min(left, k.left); top = Math.min(top, k.top);
+      right = Math.max(right, k.right); bottom = Math.max(bottom, k.bottom);
+    }
+    if (!isFinite(left)) return r;
+    return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+  }
   function rectOk(r) { return r.width >= 4 && r.height >= 4; }
   function onScreen(r) { return r.bottom > 0 && r.top < W.innerHeight && r.right > 0 && r.left < W.innerWidth; }
 
@@ -1404,6 +1444,28 @@
     return [cls, el.id, el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-title')].join(' ');
   }
 
+  // Liegt in einem fixierten Bereich: Seite scrollen bringt es nicht ins Bild
+  function inFixed(el) {
+    for (var n = el; n && n !== document.body && n !== document.documentElement; n = parentOf(n)) {
+      if (W.getComputedStyle(n).position === 'fixed') return true;
+    }
+    return false;
+  }
+
+  // Fixierte Ebene ueber fast dem ganzen Bild (Player ueber der ganzen Seite, Dialog
+  // mit Abdunklung). Die Seite dahinter ist dann verdeckt.
+  function coveringLayer() {
+    var vw = W.innerWidth, vh = W.innerHeight, layer = null;
+    var hit = document.elementFromPoint(vw / 2, vh / 2);
+    for (var n = hit; n && n !== document.body && n !== document.documentElement; n = parentOf(n)) {
+      if (n.hasAttribute && n.hasAttribute('data-fernsurfer')) return null;
+      if (W.getComputedStyle(n).position !== 'fixed') continue;
+      var r = n.getBoundingClientRect();
+      if (r.width >= vw * 0.9 && r.height >= vh * 0.85) layer = n;
+    }
+    return layer;
+  }
+
   // Alles, was man anklicken kann: Links, Knoepfe, Felder, Videos, eingebettete
   // Player - und Elemente mit "Hand"-Mauszeiger (div mit Klick-Funktion).
   function jumpTargets() {
@@ -1426,13 +1488,25 @@
            node = parentOf(node)) {
         var nr = node.getBoundingClientRect();
         if (nr.width * nr.height > vr.width * vr.height * 1.6 || nr.width > vr.width * 1.3) break;
+        // Huelle ohne eigene Hoehe (das Video liegt fixiert darueber, z. B. ZDF) zaehlt nicht
+        if (nr.width < vr.width * 0.8 || nr.height < vr.height * 0.8) break;
         root = node;
       }
       if (players.indexOf(root) < 0) { players.push(root); add(root); }
     }
+    lastPlayers = players;
     function isPlayer(el) { return players.indexOf(el) >= 0; }
     function inPlayer(el) { return players.some(function (p) { return p !== el && deepContains(p, el); }); }
     function inPlayerAsVideo(el) { return el.tagName === 'VIDEO' && inPlayer(el); }
+    // Klick-Schicht oder Huelle im Player, fast so gross wie er: doppelt, nicht anspringen
+    function fillsPlayer(el) {
+      var r = rectOf(el);
+      return players.some(function (p) {
+        if (p === el || !deepContains(p, el)) return false;
+        var pr = p.getBoundingClientRect();
+        return r.width * r.height >= pr.width * pr.height * 0.8;
+      });
+    }
 
     var list = deepQueryAll(JUMP_SEL);
     for (var i = 0; i < list.length; i++) {
@@ -1440,7 +1514,7 @@
       if (has(el) || inPlayerAsVideo(el)) continue;
       if (el.disabled || (el.tagName === 'INPUT' && el.type === 'hidden')) continue;
       if (el.getAttribute('tabindex') === '-1' && !el.matches(JUMP_SEL_STRICT)) continue;
-      var r = el.getBoundingClientRect();
+      var r = rectOf(el);
       // Nur in der Naehe des Bildschirms; seitlich ausserhalb = versteckte Karussell-Teile
       if (!rectOk(r) || r.bottom < -vh * 2 || r.top > vh * 3 || r.right <= 0 || r.left >= vw) continue;
       var cs = W.getComputedStyle(el);
@@ -1459,11 +1533,16 @@
       var r2 = e2.getBoundingClientRect();
       if (r2.width < 8 || r2.height < 8 || !onScreen(r2) || r2.width * r2.height > vp * 0.5) continue;
       if (e2.tagName === 'VIDEO' && inPlayerAsVideo(e2)) continue;
-      var pointer = W.getComputedStyle(e2).cursor === 'pointer';
+      var cs2 = W.getComputedStyle(e2);
+      // Ausgeblendete Menues (z. B. Lautstaerke-Regler, der erst beim Zeigen aufklappt)
+      if (cs2.visibility === 'hidden' || parseFloat(cs2.opacity) < 0.05) continue;
+      var pointer = cs2.cursor === 'pointer';
       // Im Player: Bedienelemente auch ohne Hand-Zeiger an ihrem Namen erkennen
       var namedControl = !pointer && r2.width <= 200 && r2.height <= 120 && inPlayer(e2) &&
         CONTROL_WORDS.test(controlLabel(e2));
       if (!pointer && !namedControl) continue;
+      // Leiste, deren einziger Knopf gerade gesperrt ist (z. B. "Empfehlungen" bei Dailymotion)
+      if (namedControl && e2.querySelector('button:disabled') && !e2.querySelector('button:not(:disabled)')) continue;
       if (pointer) {
         // Teil eines groesseren anklickbaren Elements (Text in einer Kachel, Symbol im
         // Knopf)? Dann zaehlt das Ganze. Nur im Player sind die Knoepfe eigene Ziele,
@@ -1471,12 +1550,13 @@
         var p = parentOf(e2);
         if (p && p !== document.body && W.getComputedStyle(p).cursor === 'pointer' && !inPlayer(e2)) continue;
       }
-      // Liegt es in einem Link/Knopf, der kaum groesser ist, zaehlt der Link. Steckt
-      // dagegen ein ganzer Player in einem anklickbaren Rahmen, bleiben die Knoepfe Ziele.
+      // Liegt es in einem Link/Knopf, der nicht viel groesser ist (Symbol im Knopf), zaehlt
+      // der Link - auch wenn der gerade ausgeblendet ist. Steckt dagegen ein ganzer Player
+      // in einem anklickbaren Rahmen, bleiben die Knoepfe Ziele.
       var anc = e2.closest(JUMP_SEL_STRICT);
       if (anc) {
-        var ar = anc.getBoundingClientRect();
-        if (ar.width * ar.height < r2.width * r2.height * 4) continue;
+        var ar = rectOf(anc);
+        if (ar.width * ar.height < r2.width * r2.height * 10) continue;
       }
       add(e2);
     }
@@ -1495,13 +1575,25 @@
     // Verdeckte Elemente (z. B. hinter einem Dialog) weglassen. Nicht pruefen bei Videos,
     // Playern und ihren Knoepfen: Ueber Playern liegt oft eine durchsichtige
     // Klick-Schicht, die alles "verdeckt", obwohl man die Knoepfe sieht.
-    return out.filter(function (el) {
-      if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME' || isPlayer(el) || inPlayer(el)) return true;
-      var c = centerOf(el.getBoundingClientRect());
+    out = out.filter(function (el) {
+      if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME' || isPlayer(el)) return true;
+      if (inPlayer(el)) return !fillsPlayer(el);
+      var c = centerOf(rectOf(el));
       if (c.x < 0 || c.y < 0 || c.x >= vw || c.y >= vh) return true;
       var hit = document.elementFromPoint(c.x, c.y);
       return !hit || hit === el || deepContains(el, hit) || deepContains(hit, el);
     });
+
+    // Liegt eine Ebene ueber dem ganzen Bild, nur deren Inhalt - sonst landet man in
+    // der verdeckten Seite dahinter. Nicht bei einer einzelnen Werbe-Klickflaeche.
+    var layer = coveringLayer();
+    if (layer) {
+      var inLayer = out.filter(function (el) { return deepContains(layer, el); });
+      var real = inLayer.length >= 3 || players.some(function (p) { return deepContains(layer, p); }) ||
+        layer.getAttribute('role') === 'dialog' || layer.getAttribute('aria-modal') === 'true';
+      if (inLayer.length && real) out = inLayer;
+    }
+    return out;
   }
 
   // Bestes Ziel in Richtung dir: moeglichst nah, moeglichst in derselben Zeile/Spalte
@@ -1513,7 +1605,7 @@
     for (var i = 0; i < cands.length; i++) {
       var el = cands[i];
       if (el === exclude) continue;
-      var r = el.getBoundingClientRect();
+      var r = rectOf(el);
       var c = centerOf(r);
       var d = horiz ? (c.x - fc.x) * sign : (c.y - fc.y) * sign;
       if (d <= 2) continue;
@@ -1533,6 +1625,12 @@
       var encloses = r.left <= from.left && r.right >= from.right && r.top <= from.top && r.bottom >= from.bottom;
       if (horiz && encloses) score += 100000;
       if (score < bestScore) { bestScore = score; best = el; }
+    }
+    // Von aussen in einen Player: erst den ganzen Player umrahmen, dann seine Knoepfe
+    for (var p = 0; best && p < lastPlayers.length; p++) {
+      var pl = lastPlayers[p];
+      if (pl !== best && deepContains(pl, best) && cands.indexOf(pl) >= 0 &&
+          !(exclude && deepContains(pl, exclude))) return pl;
     }
     return best;
   }
@@ -1566,7 +1664,7 @@
   function selectJump(el) {
     jumpSel = el;
     try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
-    var c = centerOf(el.getBoundingClientRect());
+    var c = centerOf(rectOf(el));
     // Mausbewegung simulieren: Player blenden dann ihre Knoepfe ein
     hoverAt(c.x, c.y);
     jumpChanged();
@@ -1575,7 +1673,7 @@
   function jumpChanged() {
     if (IS_TOP) {
       if (jumpSel) {
-        var c = centerOf(jumpSel.getBoundingClientRect());
+        var c = centerOf(rectOf(jumpSel));
         cx = c.x;
         cy = c.y;
       }
@@ -1587,19 +1685,20 @@
 
   // Ergebnis: 'moved' (neues Ziel), 'scrolled' (Seite bewegt) oder 'none'
   function jumpKey(dir) {
-    if (jumpSel && (!attached(jumpSel) || !rectOk(jumpSel.getBoundingClientRect()))) {
+    if (jumpSel && (!attached(jumpSel) || !rectOk(rectOf(jumpSel)))) {
       jumpSel = null;
     }
-    var from = jumpSel ? jumpSel.getBoundingClientRect() : initialRect(dir);
+    var from = jumpSel ? rectOf(jumpSel) : initialRect(dir);
     var next = pickNext(from, dir, jumpTargets(), jumpSel);
     // Liegt das naechste Ziel ausserhalb des Bildschirms, erst ein Stueck scrollen,
-    // damit Text dazwischen nicht uebersprungen wird.
-    if (next && onScreen(next.getBoundingClientRect())) { selectJump(next); return 'moved'; }
+    // damit Text dazwischen nicht uebersprungen wird. Ausnahme: fixierte Bereiche wie
+    // eine weggeschobene Player-Leiste - die kommt beim Zeigen von selbst ins Bild.
+    if (next && (onScreen(rectOf(next)) || inFixed(next))) { selectJump(next); return 'moved'; }
     if (scrollInDir(dir)) {
       later(function () {
-        var f2 = jumpSel ? jumpSel.getBoundingClientRect() : initialRect(dir);
+        var f2 = jumpSel ? rectOf(jumpSel) : initialRect(dir);
         var n2 = pickNext(f2, dir, jumpTargets(), jumpSel);
-        if (n2 && onScreen(n2.getBoundingClientRect())) selectJump(n2);
+        if (n2 && onScreen(rectOf(n2))) selectJump(n2);
         else jumpChanged();
       }, 180);
       return 'scrolled';
@@ -1621,7 +1720,7 @@
   function jumpActivate() {
     if (!jumpSel || !attached(jumpSel)) return false;
     var el = jumpSel;
-    var c = centerOf(el.getBoundingClientRect());
+    var c = centerOf(rectOf(el));
     var hit = document.elementFromPoint(c.x, c.y);
     var direct = hit && (hit === el || deepContains(el, hit) || deepContains(hit, el));
     if (direct || el.tagName === 'VIDEO' || el.tagName === 'IFRAME') {
@@ -1647,7 +1746,7 @@
     var cands = jumpTargets();
     var best = null, bestArea = Infinity, near = null, nearD = Infinity;
     for (var i = 0; i < cands.length; i++) {
-      var r = cands[i].getBoundingClientRect();
+      var r = rectOf(cands[i]);
       if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom && r.width * r.height < bestArea) {
         bestArea = r.width * r.height;
         best = cands[i];
@@ -1663,7 +1762,7 @@
   function reportSel(none, dir) {
     var msg = { __tb: 'jsel', none: !!none, dir: dir || '' };
     if (jumpSel && !none) {
-      var r = jumpSel.getBoundingClientRect();
+      var r = rectOf(jumpSel);
       msg.x = r.left; msg.y = r.top; msg.w = r.width; msg.h = r.height;
     }
     try { W.parent.postMessage(msg, '*'); } catch (e) {}
@@ -1682,7 +1781,7 @@
   every(function () {
     if (!jumpSel || (!IS_TOP && !frameJump)) return;
     if (IS_TOP && (!settings || settings.mode !== 'jump' || !cursorOn)) return;
-    var r = jumpSel.getBoundingClientRect();
+    var r = rectOf(jumpSel);
     var vids = document.getElementsByTagName('video');
     for (var i = 0; i < vids.length; i++) {
       var v = vids[i].getBoundingClientRect();
@@ -2200,7 +2299,7 @@
               width: frameRect.w, height: frameRect.h }
           : fr;
       } else if (jumpSel && attached(jumpSel)) {
-        r = jumpSel.getBoundingClientRect();
+        r = rectOf(jumpSel);
       }
     }
     if (!r || r.width <= 0 || r.height <= 0) {
@@ -2328,7 +2427,7 @@
     var targets = jumpTargets();
     var shown = 0;
     targets.forEach(function (el) {
-      var r = el.getBoundingClientRect();
+      var r = rectOf(el);
       if (!onScreen(r) || shown >= 400) return;
       shown++;
       debugLayer.appendChild(make('div', {
