@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Immer den neuesten Stand des Zweigs holen - auch bei "Re-run" eines alten Laufs,
+      # der sonst mit dem Stand von damals arbeiten wuerde
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Listen herunterladen
         run: |
@@ -31,9 +35,9 @@ jobs:
           curl -fsSL --retry 3 --max-time 120 -o ublock-filters.txt https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt
           # Echte Listen und nicht etwa eine Fehlerseite?
           check() {
-            grep -q "^! Title: $2" "$1" || { echo "$1: falscher Inhalt"; exit 1; }
+            grep -q "^! Title: $2" "$1" || { echo "::error::$1 ist keine Filterliste (Fehlerseite des Servers?) - nichts geaendert"; exit 1; }
             n=$(wc -l < "$1")
-            [ "$n" -ge "$3" ] || { echo "$1: nur $n Zeilen"; exit 1; }
+            [ "$n" -ge "$3" ] || { echo "::error::$1 hat nur $n Zeilen - nichts geaendert"; exit 1; }
             echo "$1: $n Zeilen"
           }
           check easylist.txt 'EasyList' 30000
@@ -65,13 +69,24 @@ jobs:
       - name: Speichern, falls sich etwas geaendert hat
         run: |
           if git diff --quiet -- dist/userScript.js; then
-            echo "Keine Aenderung an den Filtern - nichts zu tun."
+            echo "::notice::Keine Aenderung an den Filtern - nichts zu tun."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add dist/userScript.js
           git commit -m "Filterlisten aktualisiert ($(date -u +%Y-%m-%d))"
-          git push
+          if ! out=$(git push 2>&1); then
+            echo "$out"
+            # Hat sich das Repo waehrend des Laufs geaendert (z. B. eigenes Hochladen), ist
+            # das kein Fehler: Der naechste Lauf baut auf dem neuen Stand auf.
+            if echo "$out" | grep -qE 'fetch first|non-fast-forward'; then
+              echo "::warning::Das Repo wurde waehrend des Laufs geaendert - die neuen Listen kommen beim naechsten Lauf."
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "$out"
+          echo "::notice::Neue Filterlisten gespeichert."
           # Zwischenspeicher von jsDelivr leeren, damit TizenBrew die neue Datei gleich bekommt
           curl -fsS --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}/dist/userScript.js" || true
