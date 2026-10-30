@@ -1,0 +1,77 @@
+# Holt jede Woche die aktuellen Filterlisten, baut dist/userScript.js neu und speichert
+# sie nur, wenn sich dabei etwas geaendert hat. Von Hand starten: Reiter "Actions" ->
+# "Filterlisten aktualisieren" -> "Run workflow".
+name: Filterlisten aktualisieren
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'   # montags 03:17 UTC (04:17 bzw. 05:17 deutscher Zeit)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: filter-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Listen herunterladen
+        run: |
+          mkdir -p "$RUNNER_TEMP/listen"
+          cd "$RUNNER_TEMP/listen"
+          curl -fsSL --retry 3 --max-time 120 -o easylist.txt https://easylist.to/easylist/easylist.txt
+          curl -fsSL --retry 3 --max-time 120 -o easylistgermany.txt https://easylist.to/easylistgermany/easylistgermany.txt
+          curl -fsSL --retry 3 --max-time 120 -o ublock-filters.txt https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt
+          # Echte Listen und nicht etwa eine Fehlerseite?
+          check() {
+            grep -q "^! Title: $2" "$1" || { echo "$1: falscher Inhalt"; exit 1; }
+            n=$(wc -l < "$1")
+            [ "$n" -ge "$3" ] || { echo "$1: nur $n Zeilen"; exit 1; }
+            echo "$1: $n Zeilen"
+          }
+          check easylist.txt 'EasyList' 30000
+          check easylistgermany.txt 'EasyList Germany' 2000
+          check ublock-filters.txt 'uBlock filters' 3000
+
+      - name: Bauen
+        run: |
+          python3 -I tools/build.py \
+            "$RUNNER_TEMP/listen/easylist.txt" \
+            "$RUNNER_TEMP/listen/easylistgermany.txt" \
+            "$RUNNER_TEMP/listen/ublock-filters.txt"
+
+      - name: Ergebnis pruefen
+        run: |
+          # Gueltiges JavaScript mit einer plausiblen Menge an Regeln, sonst nichts speichern
+          node --check dist/userScript.js
+          node - <<'EOF'
+          const s = require('fs').readFileSync('dist/userScript.js', 'utf8');
+          const mark = "var FILTERS_JSON = '";
+          const i = s.indexOf(mark) + mark.length - 1;
+          let k = i + 1;
+          while (s[k] !== "'") k += s[k] === '\\' ? 2 : 1;
+          const data = JSON.parse(Function('return ' + s.slice(i, k + 1))());
+          if (!data.sel || data.sel.length < 5000) throw new Error('Zu wenige Regeln: ' + (data.sel || []).length);
+          console.log('Regeln:', data.sel.length, '- Datei:', Math.round(s.length / 1024), 'KB');
+          EOF
+
+      - name: Speichern, falls sich etwas geaendert hat
+        run: |
+          if git diff --quiet -- dist/userScript.js; then
+            echo "Keine Aenderung an den Filtern - nichts zu tun."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dist/userScript.js
+          git commit -m "Filterlisten aktualisiert ($(date -u +%Y-%m-%d))"
+          git push
+          # Zwischenspeicher von jsDelivr leeren, damit TizenBrew die neue Datei gleich bekommt
+          curl -fsS --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}/dist/userScript.js" || true
