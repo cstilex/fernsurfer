@@ -25,7 +25,8 @@ Rechts auf dem Bildschirm zeigt eine **Tastenhilfe**, was welche Taste macht. Si
 
 ## Startseite und Favoriten
 
-- Die Startseite ist `https://html.duckduckgo.com/html/?fernsurfer`. Das Merkmal `?fernsurfer` erkennt Fernsurfer und legt seine eigene Oberfläche über die Seite: nur Suchfeld und Favoriten als Kacheln. Normale DuckDuckGo-Suchen bleiben davon unberührt.
+- Die Startseite ist `https://html.duckduckgo.com/html/?fernsurfer`. Das Merkmal `?fernsurfer` erkennt Fernsurfer und legt seine eigene Oberfläche über die Seite: nur Suchfeld und Favoriten als Kacheln. Normale DuckDuckGo-Suchen bleiben davon unberührt. Landest du auf der leeren DuckDuckGo-Suchseite ohne Merkmal (Logo-Link, Fortsetzen der App), springt Fernsurfer zur Startseite. Suchen über das Suchfeld von DuckDuckGo stehen mit dem Suchbegriff in der Adresse, damit Zurück und Neuladen die Ergebnisse wieder zeigen.
+- Kurz nach dem Start von TizenBrew kann DuckDuckGo einen Moment ohne Fernsurfer zu sehen sein. TizenBrew lädt das Modul erst beim ersten Aufruf von jsDelivr. Kommt die Startseite gar nicht, hilft es, TizenBrew neu zu starten.
 - Pfeiltasten wählen eine Kachel, OK öffnet sie. Ganz oben ist das Suchfeld.
 - **Neuer Favorit auf der Startseite:** Kachel **„+ Favorit hinzufügen“** → Adresse eintippen → OK bzw. „Fertig“. Die Adresse wird direkt als Kachel gespeichert, ohne die Seite zu öffnen.
 - **Favorit von einer Seite aus speichern:** auf der Seite Rot drücken (Adressleiste) → mit → zum Knopf **★ Favorit** → OK. Es erscheint eine Nachfrage auf der Startseite, danach geht es zurück zur Seite. Alternativ geht das über Blau → „Zu Favoriten hinzufügen“.
@@ -73,7 +74,8 @@ Wie im Link-Modus des Samsung-Browsers springen die Pfeiltasten von Element zu E
 
 - Liegt eine unsichtbare Klick-Schicht über dem Player, die beim Klick ein Popup öffnen will, räumt Fernsurfer sie beim ersten OK weg und reicht den Klick an den Player durch.
 - Reagiert ein Player nicht auf OK, startet Fernsurfer das Video direkt.
-- Ein Vollbild-Knopf, der in TizenBrew nichts tut, legt das Video bzw. den eingebetteten Player stattdessen über den ganzen Bildschirm. **Zurück** beendet das.
+- Ein Vollbild-Knopf, der in TizenBrew nichts tut, legt das Video bzw. den eingebetteten Player stattdessen über den ganzen Bildschirm.
+- **Im Vollbild** sind Zeiger und Rahmen ausgeblendet, ← → spulen, OK pausiert. **Zurück** beendet jedes Vollbild (auch das echte der Seite), ohne die Seite zu verlassen. Danach sind Zeiger bzw. Rahmen wieder da, wo sie vorher waren.
 
 ## Was der Werbefilter kann
 
@@ -113,6 +115,8 @@ Danach erhöhst du `version` in `package.json` und lädst die geänderten Dateie
 
 ## Änderungen
 
+- **1.3.5:** Weniger Speicher und Rechenzeit bei langen Videos. TizenBrew schleust Fernsurfer in jeden iframe ein, auch in jede Werbefläche. Jeder Rahmen gibt die kompletten Filterlisten jetzt nach dem Einrichten wieder frei, statt sie bis zum Schluss zu behalten. Die Filterdaten werden schneller eingelesen (als JSON). Entfernte iframes und Elemente hält Fernsurfer nicht mehr fest. Der Werbefilter reagiert nicht mehr auf jede Änderung der Zeitanzeige im Player. Im Vollbild ruhen Rahmen und Maus-Simulation.
+- **1.3.4:** Im Vollbild ist der Zeiger ausgeblendet. Zurück beendet jetzt auch das echte Vollbild einer Seite, statt die Seite zu verlassen. Startseite abgesichert: Die leere DuckDuckGo-Suchseite springt zur Startseite, und Suchen über das DuckDuckGo-Formular behalten den Suchbegriff in der Adresse.
 - **1.3.3:** Klicks und Zeigerbewegungen sehen für Webseiten jetzt wie von einer echten Maus aus. Vorher ignorierte z. B. ZDF den Knopf „Abspielen“, und manche Player blendeten ihre Leiste nicht ein. Link-Modus: Beim Hineinspringen wird zuerst der ganze Player umrahmt. Ein Player über der ganzen Seite hält den Link-Modus bei sich, statt in die verdeckte Seite dahinter zu springen. Außerdem wird kein Rahmen mehr ohne Höhe als Player erkannt (ZDF), und unsichtbare Menüs (Lautstärke-Regler bei arte), Symbole in Knöpfen (d.tube) und gesperrte Knöpfe werden nicht mehr angesprungen.
 - **1.3.2:** Link-Modus: Links mit einem großen Bild darin werden mit der ganzen Bildfläche umrahmt und angesprungen (vorher nur eine Textzeile hoch).
 - **1.3.1:** Adressleiste mit zwei Zuständen (Tastatur offen / zu), → erreicht den Stern bei geschlossener Tastatur. Die Leiste erzwingt die Schreibrichtung links nach rechts und das Eingabefeld kann nicht mehr zusammenfallen (mögliche Ursachen für den Stern links). „Abbrechen“ der Bildschirmtastatur schließt nur die Tastatur.

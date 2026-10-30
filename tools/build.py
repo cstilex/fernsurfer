@@ -287,9 +287,11 @@ def main(argv):
         print("Platzhalter fehlt in src/fernsurfer.js")
         return 1
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    # Kein '</script>' und keine Zeilentrenner, die alte JS-Engines stoeren
+    # Als JSON-Text in einem JS-String mit einfachen Anfuehrungszeichen (das Modul liest
+    # ihn mit JSON.parse). Kein '</script>' und keine Zeilentrenner, die alte JS-Engines stoeren.
+    payload = payload.replace("\\", "\\\\").replace("'", "\\'")
     payload = payload.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    src = src.replace(PLACEHOLDER, payload)
+    src = src.replace(PLACEHOLDER, "'" + payload + "'")
     if start_url:
         if not re.match(r"^https?://[^\s'\"\\]+$", start_url):
             print("Ungueltige --start-Adresse:", start_url)

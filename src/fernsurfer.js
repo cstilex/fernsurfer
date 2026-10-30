@@ -28,8 +28,13 @@
   function later(fn, ms) { return ST.call(W, fn, ms); }
   function every(fn, ms) { return SI.call(W, fn, ms); }
 
-  var VERSION = '1.3.3';
-  var FILTERS = /*@@FILTERS@@*/null;
+  var VERSION = '1.3.5';
+  // Filterdaten als JSON-Text: JSON.parse ist schneller und sparsamer als ein riesiges
+  // Objekt-Literal. Nach dem Einrichten werden sie wieder freigegeben (siehe unten),
+  // denn TizenBrew schleust das Modul in jeden einzelnen iframe ein.
+  var FILTERS_JSON = /*@@FILTERS@@*/null;
+  var FILTERS = null;
+  var NET = '';           // Domain-Sperren (nur mit --net), werden laufend gebraucht
   var SEARCH = 'https://html.duckduckgo.com/html/?q=';
   // Startseite mit den Favoriten: die DuckDuckGo-HTML-Seite mit dem Merkmal
   // "?fernsurfer". Fernsurfer legt dort seine eigene Oberflaeche ueber die Seite;
@@ -39,14 +44,26 @@
   var IS_TOP = W.top === W;
   var HOST = (location.hostname || '').toLowerCase();
   var OFF_KEY = 'fernsurfer:off';
+  function samePath(a, b) { return a.replace(/\/+$/, '') === b.replace(/\/+$/, ''); }
   var IS_START = IS_TOP && (function () {
     try {
       var s = new URL(START);
-      if (location.hostname !== s.hostname || location.pathname !== s.pathname) return false;
+      if (location.hostname !== s.hostname || !samePath(location.pathname, s.pathname)) return false;
       // Suchergebnisse liegen unter derselben Adresse - das Merkmal muss dabei sein
       var want = s.search.replace(/^\?/, '').split('&').filter(Boolean);
       var have = location.search.replace(/^\?/, '').split('&');
       return want.every(function (p) { return have.indexOf(p) >= 0; });
+    } catch (e) {
+      return false;
+    }
+  })();
+  // Dieselbe Seite ohne Merkmal: die leere DuckDuckGo-Suchseite (Logo-Link, Suche ueber
+  // das Formular von DuckDuckGo, Fortsetzen der App). Ohne Ergebnisse darauf -> Startseite.
+  var IS_BARE_START = IS_TOP && !IS_START && (function () {
+    try {
+      var s = new URL(START);
+      return location.hostname === s.hostname && samePath(location.pathname, s.pathname) &&
+        !location.search && !location.hash;
     } catch (e) {
       return false;
     }
@@ -475,12 +492,13 @@
   var SITE = HOST.split('.').slice(-2).join('.');
 
   function isBlockedUrl(url) {
-    if (!FILTERS || !FILTERS.net || !url) return false;
+    if (!(netSet || NET) || !url) return false;
     var host;
     try { host = new URL(url, location.href).hostname.toLowerCase(); } catch (e) { return false; }
     if (!host || host === HOST || host === SITE || host.slice(-SITE.length - 1) === '.' + SITE) return false;
     if (!netSet) {
-      netSet = new Set(FILTERS.net.split(' '));
+      netSet = new Set(NET.split(' '));
+      NET = '';  // der Text wird nicht mehr gebraucht, nur noch die Menge
     }
     var labels = host.split('.');
     for (var i = 0; i < labels.length - 1; i++) {
@@ -490,7 +508,7 @@
   }
 
   function installNetBlock() {
-    if (!FILTERS || !FILTERS.net) return;
+    if (!NET) return;
 
     var origFetch = W.fetch;
     if (typeof origFetch === 'function') {
@@ -596,11 +614,13 @@
     var style = document.createElement('style');
     style.setAttribute('data-fernsurfer', 'filters');
     style.textContent = css.join('\n');
+    css = null;
 
     // Ersatzweg fuer Seiten mit CSP: Elemente direkt per Skript ausblenden.
     // CSSOM-Aenderungen an element.style erlaubt die CSP weiterhin.
     var jsMode = false;
-    var jsRules = rules.slice();
+    var jsRules = rules;
+    rules = null;  // Listen nicht in den Funktionen unten festhalten (Speicher je iframe)
     var jsTimer = null;
 
     function declarations(text) {
@@ -638,6 +658,8 @@
     if (FILTERS.gs) {
       FILTERS.gs.split(' ').forEach(function (s) { if (!unhide[s]) simple.add(s); });
     }
+    sel = null;
+    unhide = null;
     var matched = {};
     var found = [];
     var dyn = document.createElement('style');
@@ -696,6 +718,10 @@
           if (style.parentNode) style.parentNode.removeChild(style);
           if (dyn.parentNode) dyn.parentNode.removeChild(dyn);
           scheduleJsHide();
+        } else {
+          // Das Stylesheet greift - die Regeln fuers Ausblenden per Skript braucht es nicht
+          jsRules = [];
+          styledDecls = [];
         }
       }
       return true;
@@ -711,13 +737,22 @@
       attach();
       survey(document.documentElement);
       flush();
+      // Laeuft bei Videos staendig (Zeitanzeige, Fortschritt), deshalb sparsam: Bei
+      // geaenderter Klasse/ID nur das Element selbst pruefen (die Kinder sind unveraendert),
+      // Textknoten nicht durchsuchen. Das Ausblenden per Skript (Seiten mit CSP) laeuft
+      // dagegen weiter bei jeder Aenderung - es erfasst auch andere Merkmale (href, src ...).
       new MutationObserver(function (muts) {
         for (var k = 0; k < muts.length; k++) {
           var m = muts[k];
-          if (m.type === 'attributes') queue.push(m.target);
-          else for (var n = 0; n < m.addedNodes.length; n++) queue.push(m.addedNodes[n]);
+          if (m.type === 'attributes') {
+            if (m.target.nodeType === 1) check(m.target);
+          } else {
+            for (var n = 0; n < m.addedNodes.length; n++) {
+              if (m.addedNodes[n].nodeType === 1) queue.push(m.addedNodes[n]);
+            }
+          }
         }
-        if (!timer && queue.length) timer = later(processQueue, 50);
+        if (!timer && (queue.length || found.length)) timer = later(processQueue, 50);
         scheduleJsHide();
       }).observe(document.documentElement, {
         childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'id']
@@ -889,11 +924,17 @@
 
   // Reihenfolge: Scriptlets zuerst, damit sie vor den Skripten der Seite greifen.
   if (!DISABLED) {
+    try { FILTERS = FILTERS_JSON ? JSON.parse(FILTERS_JSON) : null; } catch (e) { FILTERS = null; }
+    NET = (FILTERS && FILTERS.net) || '';
     try { runScriptlets(); } catch (e) {}
     try { installNetBlock(); } catch (e) {}
     try { installPopupBlock(); } catch (e) {}
     try { installCosmetics(); } catch (e) {}
   }
+  // Was die Filter brauchen, haben sie sich jetzt herausgesucht. Die kompletten Listen
+  // freigeben - sonst lagen sie in jedem iframe (auch jeder Werbeflaeche) im Speicher.
+  FILTERS = null;
+  FILTERS_JSON = null;
 
   /* ------------------------------------------------------------------ */
   /* Kommunikation zwischen Frames                                       */
@@ -1002,6 +1043,21 @@
     try { W.parent.postMessage({ __tb: 'hello' }, '*'); } catch (e) {}
   }
 
+  // Entfernte iframes (z. B. wechselnde Werbung) und Elemente nicht festhalten: Ein
+  // Verweis auf das Fenster eines entfernten iframes haelt dessen ganzen Inhalt im Speicher.
+  every(function () {
+    function alive(w) { try { return !w.closed && !!frameForWindow(w); } catch (e) { return false; } }
+    knownFrames = knownFrames.filter(alive);
+    childPlaying = childPlaying.filter(alive);
+    if (lastForward && Date.now() - lastForward.time > 3000) lastForward = null;
+    if (lastHover && !attached(lastHover)) lastHover = null;
+    if (pendingFrame && !attached(pendingFrame)) pendingFrame = null;
+    if (jumpSel && !attached(jumpSel)) {
+      jumpSel = null;
+      if (IS_TOP) drawRing();  // alten Rahmen wegnehmen
+    }
+  }, 10000);
+
   /* ------------------------------------------------------------------ */
   /* Klicken, Hovern, Medien                                             */
   /* ------------------------------------------------------------------ */
@@ -1103,6 +1159,17 @@
 
   function isNativeFullscreen() {
     return !!(document.fullscreenElement || document.webkitFullscreenElement || document.webkitIsFullScreen);
+  }
+
+  // Echtes Vollbild der Seite beenden (Zurueck-Taste)
+  function exitNativeFullscreen() {
+    if (!isNativeFullscreen()) return false;
+    try {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen || document.webkitCancelFullScreen;
+      var p = exit && exit.call(document);
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+    return true;
   }
 
   // TizenBrew erlaubt kein echtes Vollbild aus eingebetteten Playern; stattdessen
@@ -1781,6 +1848,7 @@
   every(function () {
     if (!jumpSel || (!IS_TOP && !frameJump)) return;
     if (IS_TOP && (!settings || settings.mode !== 'jump' || !cursorOn)) return;
+    if (fsState || isNativeFullscreen()) return;  // im Vollbild braucht es die Knoepfe nicht
     var r = rectOf(jumpSel);
     var vids = document.getElementsByTagName('video');
     for (var i = 0; i < vids.length; i++) {
@@ -2125,7 +2193,8 @@
     ensureCursorPos();
     css(ui.cursor, {
       transform: 'translate(' + Math.round(cx) + 'px,' + Math.round(cy) + 'px)',
-      opacity: cursorOn && !IS_START ? '1' : '0'
+      // Im Vollbild stoert der Zeiger nur (dort spulen die Pfeiltasten)
+      opacity: cursorOn && !IS_START && !fsActive() ? '1' : '0'
     });
   }
 
@@ -2223,8 +2292,9 @@
     drawRing();
   }
 
-  on(document, 'fullscreenchange', applyHelpVisibility);
-  on(document, 'webkitfullscreenchange', applyHelpVisibility);
+  // Vollbild an oder aus (auch durch die Seite selbst): Hilfe, Zeiger und Rahmen anpassen
+  on(document, 'fullscreenchange', onMediaActivity);
+  on(document, 'webkitfullscreenchange', onMediaActivity);
 
   function toggleHelp() {
     settings.help = !settings.help;
@@ -2321,7 +2391,10 @@
     if (ringTimer) return;
     ringTimer = later(function () { ringTimer = null; drawRing(); }, 40);
   }, true);
-  every(function () { if (jumpSel || innerFrame) drawRing(); }, 500);
+  every(function () {
+    if (innerFrame && !attached(innerFrame)) { innerFrame = null; frameRect = null; }
+    if ((jumpSel || innerFrame) && !fsActive()) drawRing();
+  }, 500);
 
   function enterFrame(frame) {
     innerFrame = frame;
@@ -3105,7 +3178,9 @@
 
     if (code === KEY.BACK) {
       consume();
-      if (exitPseudoFullscreen()) return;
+      // Zuerst jedes Vollbild beenden - eigenes und das der Seite -, nie dabei die Seite verlassen
+      var wasPseudo = exitPseudoFullscreen();
+      if (exitNativeFullscreen() || wasPseudo) { later(onMediaActivity, 300); return; }
       if (leaveFrame()) return;  // aus dem Player zurueck auf die Seite
       if (history.length > 1) history.back();
       else toast('Keine vorherige Seite');
@@ -3198,6 +3273,20 @@
   });
 
   onReady(function () {
+    // Suchergebnisse per Formular haben dieselbe Adresse - die bleiben
+    if (IS_BARE_START && !document.querySelector('.result, .results, #links, .no-results, form[action*="challenge"]')) {
+      location.replace(START);
+      return;
+    }
+    // DuckDuckGo sucht per POST: Die Adresse enthaelt dann keinen Suchbegriff, und
+    // Zurueck oder Neuladen zeigt nur die leere Suchseite. Mit GET steht er in der Adresse.
+    try {
+      if (HOST === new URL(SEARCH).hostname) {
+        Array.prototype.forEach.call(document.forms, function (f) {
+          if ((f.method || '').toLowerCase() === 'post' && /\/html\/?$/.test(f.getAttribute('action') || '')) f.method = 'get';
+        });
+      }
+    } catch (e) {}
     if (IS_START) {
       try {
         if (document.body) while (document.body.firstChild) document.body.removeChild(document.body.firstChild);
