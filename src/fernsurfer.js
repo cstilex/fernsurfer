@@ -28,13 +28,13 @@
   function later(fn, ms) { return ST.call(W, fn, ms); }
   function every(fn, ms) { return SI.call(W, fn, ms); }
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.1';
   var FILTERS = /*@@FILTERS@@*/null;
   var SEARCH = 'https://html.duckduckgo.com/html/?q=';
   // Startseite mit den Favoriten: die DuckDuckGo-HTML-Seite mit dem Merkmal
   // "?fernsurfer". Fernsurfer legt dort seine eigene Oberflaeche ueber die Seite;
   // die Favoriten liegen im localStorage dieser Seite. tools/build.py kann die
-  // Adresse ersetzen (--start), z. B. fuer Tests.
+  // Adresse ersetzen (--start).
   var START = /*@@START@@*/'https://html.duckduckgo.com/html/?fernsurfer';
   var IS_TOP = W.top === W;
   var HOST = (location.hostname || '').toLowerCase();
@@ -85,6 +85,9 @@
   var toastTimer = null;
   var userActed = false;  // erste Taste gedrueckt?
   var lastForward = null; // { win, time } - letzter Klick, der an einen iframe ging
+  var barMode = 'go';     // Adressleiste: 'go' (oeffnen) oder 'add' (neuer Favorit)
+  var barEditing = false; // Adressleiste: Tastatur offen (Eingabefeld hat den Fokus)
+  var barSel = 'input';   // Adressleiste, Tastatur zu: 'input' oder 'star' ausgewaehlt
   var fsState = null;     // Pseudo-Vollbild: { el, css }
   var childPlaying = [];  // iframes (Fenster), die ein laufendes Video melden
   var reportedPlaying = false;
@@ -1357,6 +1360,50 @@
   function rectOk(r) { return r.width >= 4 && r.height >= 4; }
   function onScreen(r) { return r.bottom > 0 && r.top < W.innerHeight && r.right > 0 && r.left < W.innerWidth; }
 
+  // contains(), das auch in Shadow-DOMs hineinschaut
+  function deepContains(a, b) {
+    for (var n = b; n; n = n.parentNode || n.host) { if (n === a) return true; }
+    return false;
+  }
+  // Haengt das Element noch in der Seite? (contains() verneint das faelschlich in Shadow-DOMs)
+  function attached(el) {
+    return !!el && (el.isConnected !== undefined ? el.isConnected : deepContains(document.documentElement, el));
+  }
+  function parentOf(n) { return n.parentElement || (n.parentNode && n.parentNode.host) || null; }
+
+  // Offene Shadow-DOMs (Web-Komponenten, z. B. moderne Player) einsammeln.
+  // Wird kurz zwischengespeichert, weil dafuer alle Elemente durchgegangen werden.
+  var shadowCache = { time: 0, roots: [] };
+  function shadowRoots() {
+    if (Date.now() - shadowCache.time < 2000) return shadowCache.roots;
+    var roots = [];
+    (function walk(root) {
+      var all = root.querySelectorAll('*');
+      for (var i = 0; i < all.length && roots.length < 200; i++) {
+        var sr = all[i].shadowRoot;
+        if (sr) { roots.push(sr); walk(sr); }
+      }
+    })(document);
+    shadowCache = { time: Date.now(), roots: roots };
+    return roots;
+  }
+  function deepQueryAll(selector) {
+    var out = Array.prototype.slice.call(document.querySelectorAll(selector));
+    shadowRoots().forEach(function (sr) {
+      out = out.concat(Array.prototype.slice.call(sr.querySelectorAll(selector)));
+    });
+    return out;
+  }
+
+  // Bedienelemente von Playern tragen fast immer sprechende Namen in Klasse,
+  // Beschriftung oder Titel - auch wenn sie sonst nicht als Knopf gekennzeichnet sind.
+  var CONTROL_WORDS = /(play|pause|mute|volume|sound|full.?screen|vollbild|seek|skip|rewind|forward|next|prev|setting|quality|caption|subtitle|untertitel|control|button|btn|toggle|pip)/i;
+  function controlLabel(el) {
+    var cls = el.className;
+    if (cls && typeof cls === 'object' && cls.baseVal !== undefined) cls = cls.baseVal;
+    return [cls, el.id, el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-title')].join(' ');
+  }
+
   // Alles, was man anklicken kann: Links, Knoepfe, Felder, Videos, eingebettete
   // Player - und Elemente mit "Hand"-Mauszeiger (div mit Klick-Funktion).
   function jumpTargets() {
@@ -1366,9 +1413,31 @@
     function add(el) { out.push(el); if (mark) mark.add(el); }
     function has(el) { return mark ? mark.has(el) : out.indexOf(el) >= 0; }
 
-    var list = document.querySelectorAll(JUMP_SEL);
+    // Videoplayer als Ganzes: das groesste Element um das Video, das kaum groesser
+    // ist als das Video selbst (Video + Bedienleiste). Ersetzt das nackte Video.
+    var players = [];
+    var vids = deepQueryAll('video');
+    for (var v = 0; v < vids.length; v++) {
+      var vr = vids[v].getBoundingClientRect();
+      if (!rectOk(vr) || vr.width * vr.height < vp * 0.02) continue;
+      if (vr.bottom < -vh * 2 || vr.top > vh * 3) continue;
+      var root = vids[v];
+      for (var node = parentOf(vids[v]); node && node !== document.body && node !== document.documentElement;
+           node = parentOf(node)) {
+        var nr = node.getBoundingClientRect();
+        if (nr.width * nr.height > vr.width * vr.height * 1.6 || nr.width > vr.width * 1.3) break;
+        root = node;
+      }
+      if (players.indexOf(root) < 0) { players.push(root); add(root); }
+    }
+    function isPlayer(el) { return players.indexOf(el) >= 0; }
+    function inPlayer(el) { return players.some(function (p) { return p !== el && deepContains(p, el); }); }
+    function inPlayerAsVideo(el) { return el.tagName === 'VIDEO' && inPlayer(el); }
+
+    var list = deepQueryAll(JUMP_SEL);
     for (var i = 0; i < list.length; i++) {
       var el = list[i];
+      if (has(el) || inPlayerAsVideo(el)) continue;
       if (el.disabled || (el.tagName === 'INPUT' && el.type === 'hidden')) continue;
       if (el.getAttribute('tabindex') === '-1' && !el.matches(JUMP_SEL_STRICT)) continue;
       var r = el.getBoundingClientRect();
@@ -1380,17 +1449,35 @@
     }
 
     // Nur im sichtbaren Bereich und mit Obergrenze, damit es auf dem TV schnell bleibt
-    var all = document.body ? document.body.getElementsByTagName('*') : [];
-    var limit = Math.min(all.length, 4000);
-    for (var k = 0; k < limit; k++) {
+    var all = document.body ? Array.prototype.slice.call(document.body.getElementsByTagName('*'), 0, 4000) : [];
+    shadowRoots().forEach(function (sr) {
+      if (all.length < 5000) all = all.concat(Array.prototype.slice.call(sr.querySelectorAll('*'), 0, 1000));
+    });
+    for (var k = 0; k < all.length; k++) {
       var e2 = all[k];
       if (SKIP_TAGS[e2.tagName] || has(e2)) continue;
       var r2 = e2.getBoundingClientRect();
       if (r2.width < 8 || r2.height < 8 || !onScreen(r2) || r2.width * r2.height > vp * 0.5) continue;
-      if (W.getComputedStyle(e2).cursor !== 'pointer') continue;
-      var p = e2.parentElement;
-      if (p && p !== document.body && W.getComputedStyle(p).cursor === 'pointer') continue;
-      if (e2.closest(JUMP_SEL_STRICT)) continue;
+      if (e2.tagName === 'VIDEO' && inPlayerAsVideo(e2)) continue;
+      var pointer = W.getComputedStyle(e2).cursor === 'pointer';
+      // Im Player: Bedienelemente auch ohne Hand-Zeiger an ihrem Namen erkennen
+      var namedControl = !pointer && r2.width <= 200 && r2.height <= 120 && inPlayer(e2) &&
+        CONTROL_WORDS.test(controlLabel(e2));
+      if (!pointer && !namedControl) continue;
+      if (pointer) {
+        // Teil eines groesseren anklickbaren Elements (Text in einer Kachel, Symbol im
+        // Knopf)? Dann zaehlt das Ganze. Nur im Player sind die Knoepfe eigene Ziele,
+        // auch wenn der ganze Player einen Hand-Zeiger hat.
+        var p = parentOf(e2);
+        if (p && p !== document.body && W.getComputedStyle(p).cursor === 'pointer' && !inPlayer(e2)) continue;
+      }
+      // Liegt es in einem Link/Knopf, der kaum groesser ist, zaehlt der Link. Steckt
+      // dagegen ein ganzer Player in einem anklickbaren Rahmen, bleiben die Knoepfe Ziele.
+      var anc = e2.closest(JUMP_SEL_STRICT);
+      if (anc) {
+        var ar = anc.getBoundingClientRect();
+        if (ar.width * ar.height < r2.width * r2.height * 4) continue;
+      }
       add(e2);
     }
 
@@ -1398,21 +1485,22 @@
     // Knoepfen, Videos und Playern
     var KEEP = { A: 1, BUTTON: 1, VIDEO: 1, IFRAME: 1 };
     out = out.filter(function (el) {
-      if (KEEP[el.tagName]) return true;
+      if (KEEP[el.tagName] || isPlayer(el)) return true;
       for (var j = 0; j < out.length; j++) {
-        if (out[j] !== el && el.contains(out[j])) return false;
+        if (out[j] !== el && deepContains(el, out[j])) return false;
       }
       return true;
     });
 
-    // Verdeckte Elemente (z. B. hinter einem Dialog) weglassen. Videos und Player
-    // bleiben, auch wenn eine Klick-Schicht darueber liegt - die raeumt OK weg.
+    // Verdeckte Elemente (z. B. hinter einem Dialog) weglassen. Nicht pruefen bei Videos,
+    // Playern und ihren Knoepfen: Ueber Playern liegt oft eine durchsichtige
+    // Klick-Schicht, die alles "verdeckt", obwohl man die Knoepfe sieht.
     return out.filter(function (el) {
-      if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME') return true;
+      if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME' || isPlayer(el) || inPlayer(el)) return true;
       var c = centerOf(el.getBoundingClientRect());
       if (c.x < 0 || c.y < 0 || c.x >= vw || c.y >= vh) return true;
       var hit = document.elementFromPoint(c.x, c.y);
-      return !hit || hit === el || el.contains(hit) || hit.contains(el);
+      return !hit || hit === el || deepContains(el, hit) || deepContains(hit, el);
     });
   }
 
@@ -1439,7 +1527,8 @@
       var overlap = horiz ? Math.min(r.bottom, from.bottom) - Math.max(r.top, from.top)
                           : Math.min(r.right, from.right) - Math.max(r.left, from.left);
       var side = overlap > 0 ? 0 : (horiz ? Math.abs(c.y - fc.y) : Math.abs(c.x - fc.x));
-      var score = gap + side * 2.5;
+      // bei Gleichstand gewinnt, was naeher an der Mitte der Auswahl liegt
+      var score = gap + side * 2.5 + (horiz ? Math.abs(c.y - fc.y) : Math.abs(c.x - fc.x)) * 0.01;
       // Seitlich nicht zurueck in das umschliessende Element (Video um seine Knoepfe)
       var encloses = r.left <= from.left && r.right >= from.right && r.top <= from.top && r.bottom >= from.bottom;
       if (horiz && encloses) score += 100000;
@@ -1448,13 +1537,14 @@
     return best;
   }
 
-  // Ohne Auswahl beginnt "runter" oben, "hoch" unten, "rechts" links, "links" rechts
+  // Ohne Auswahl wie im Samsung-Browser in einer Ecke beginnen: "runter" und "rechts"
+  // oben links, "hoch" unten links, "links" oben rechts
   function initialRect(dir) {
     var vw = W.innerWidth, vh = W.innerHeight;
-    if (dir === 'down') return { left: 0, right: vw, top: -1, bottom: -1, width: vw, height: 0 };
-    if (dir === 'up') return { left: 0, right: vw, top: vh + 1, bottom: vh + 1, width: vw, height: 0 };
-    if (dir === 'right') return { left: -1, right: -1, top: 0, bottom: vh, width: 0, height: vh };
-    return { left: vw + 1, right: vw + 1, top: 0, bottom: vh, width: 0, height: vh };
+    if (dir === 'down') return { left: 0, right: 1, top: -1, bottom: -1, width: 1, height: 0 };
+    if (dir === 'up') return { left: 0, right: 1, top: vh + 1, bottom: vh + 1, width: 1, height: 0 };
+    if (dir === 'right') return { left: -1, right: -1, top: 0, bottom: 1, width: 0, height: 1 };
+    return { left: vw + 1, right: vw + 1, top: 0, bottom: 1, width: 0, height: 1 };
   }
 
   function scrollInDir(dir) {
@@ -1497,7 +1587,7 @@
 
   // Ergebnis: 'moved' (neues Ziel), 'scrolled' (Seite bewegt) oder 'none'
   function jumpKey(dir) {
-    if (jumpSel && (!document.documentElement.contains(jumpSel) || !rectOk(jumpSel.getBoundingClientRect()))) {
+    if (jumpSel && (!attached(jumpSel) || !rectOk(jumpSel.getBoundingClientRect()))) {
       jumpSel = null;
     }
     var from = jumpSel ? jumpSel.getBoundingClientRect() : initialRect(dir);
@@ -1518,22 +1608,35 @@
     return 'none';
   }
 
+  // Das Video des Players, zu dem ein Knopf gehoert
+  function videoNear(el) {
+    for (var n = el; n && n !== document.documentElement; n = parentOf(n)) {
+      var v = n.tagName === 'VIDEO' ? n : (n.querySelector && n.querySelector('video'));
+      if (v) return v;
+    }
+    return biggestVideo();
+  }
+
   // OK im Link-Modus
   function jumpActivate() {
-    if (!jumpSel || !document.documentElement.contains(jumpSel)) return false;
+    if (!jumpSel || !attached(jumpSel)) return false;
     var el = jumpSel;
     var c = centerOf(el.getBoundingClientRect());
     var hit = document.elementFromPoint(c.x, c.y);
-    var direct = hit && (hit === el || el.contains(hit) || hit.contains(el));
+    var direct = hit && (hit === el || deepContains(el, hit) || deepContains(hit, el));
     if (direct || el.tagName === 'VIDEO' || el.tagName === 'IFRAME') {
       clickAt(c.x, c.y);          // inkl. Klick-Schichten wegraeumen, Video starten
     } else if (isEditable(el)) {
       el.focus();
       try { el.click(); } catch (e) {}
     } else {
-      // Etwas liegt teilweise darueber (z. B. eine feste Kopfzeile): direkt anklicken
+      // Etwas liegt darueber (feste Kopfzeile, Klick-Schicht im Player): direkt anklicken
       lastUserMedia = Date.now();
+      var wantsFs = looksLikeFullscreenControl(el);
       dispatchClick(el, c.x, c.y);
+      if (wantsFs) {
+        later(function () { if (!isNativeFullscreen() && !fsState) requestFullscreenFor(videoNear(el)); }, 300);
+      }
     }
     later(jumpChanged, 350);       // Layout kann sich nach dem Klick aendern
     return true;
@@ -1624,7 +1727,7 @@
   // window.name bleibt beim Wechsel auf andere Seiten im selben Fenster erhalten
   // (Chromium 63). Darin stehen nur harmlose Schalter, keine Favoriten.
   var NAME_PREFIX = 'fernsurfer:';
-  var settings = { help: true, mode: 'jump' };  // mode: 'jump' (Link-Modus) oder 'free' (freier Zeiger)
+  var settings = { help: true, mode: 'free' };  // mode: 'free' (freier Zeiger) oder 'jump' (Link-Modus)
   var flash = null;
   (function () {
     var raw = null;
@@ -1662,68 +1765,85 @@
   var TOP_Z = '2147483647';
   var FONT = '"Segoe UI", Roboto, "Samsung One", Arial, sans-serif';
   var ACCENT = '#4a90e2';
-  var STYLE = {
-    cursor: {
-      position: 'fixed', left: '0', top: '0', width: '28px', height: '28px', margin: '-3px 0 0 -3px',
-      'pointer-events': 'none', 'z-index': TOP_Z, transition: 'opacity .2s', display: 'block'
-    },
-    svg: { width: '100%', height: '100%', display: 'block', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.6))' },
-    toast: {
-      position: 'fixed', right: '32px', bottom: '32px', 'max-width': '60%', padding: '12px 20px',
-      'border-radius': '10px', background: 'rgba(20,20,24,.92)', color: '#fff',
-      font: '600 20px/1.3 ' + FONT, 'pointer-events': 'none', 'z-index': TOP_Z, opacity: '0',
-      transition: 'opacity .25s'
-    },
-    bar: {
-      position: 'fixed', left: '0', right: '0', top: '0', display: 'none', 'align-items': 'center',
-      padding: '16px 24px', background: 'rgba(20,20,24,.97)', 'z-index': TOP_Z, font: '20px ' + FONT,
-      color: '#fff', 'box-shadow': '0 4px 16px rgba(0,0,0,.5)', 'box-sizing': 'border-box'
-    },
-    input: {
-      flex: '1', 'min-width': '0', font: '22px ' + FONT, padding: '10px 14px', 'border-radius': '8px',
-      border: '2px solid ' + ACCENT, background: '#fff', color: '#111', outline: 'none'
-    },
-    btn: {
-      'margin-left': '12px', padding: '10px 18px', 'border-radius': '8px', border: '2px solid #555',
-      background: '#2b2f3a', color: '#fff', font: '600 20px ' + FONT, outline: 'none', cursor: 'pointer',
-      'white-space': 'nowrap'
-    },
-    btnFocus: { background: ACCENT, 'border-color': '#fff', color: '#fff' },
-    hint: { 'margin-left': '16px', 'font-size': '15px', color: '#aaa', 'white-space': 'nowrap' },
-    menu: {
-      position: 'fixed', right: '32px', top: '32px', 'min-width': '440px', display: 'none', padding: '12px 0',
-      'border-radius': '14px', background: 'rgba(20,20,24,.97)', color: '#fff', font: '20px/1.3 ' + FONT,
-      'z-index': TOP_Z, 'box-shadow': '0 8px 24px rgba(0,0,0,.5)'
-    },
-    title: { padding: '4px 24px 12px', 'font-size': '15px', color: '#aaa' },
-    item: { padding: '12px 24px' },
-    help: {
-      position: 'fixed', right: '24px', top: '50%', transform: 'translateY(-50%)', width: '310px',
-      padding: '18px 18px 14px', 'border-radius': '18px', background: 'rgba(16,18,28,.9)', color: '#fff',
-      font: '17px/1.3 ' + FONT, 'z-index': '2147483645', 'box-shadow': '0 10px 30px rgba(0,0,0,.5)',
-      border: '1px solid rgba(255,255,255,.12)', 'pointer-events': 'none', 'box-sizing': 'border-box'
-    },
-    helpTab: {
-      position: 'fixed', right: '0', top: '50%', transform: 'translateY(-50%)', padding: '14px 8px',
-      'border-radius': '10px 0 0 10px', background: 'rgba(16,18,28,.8)', color: '#fff',
-      font: '600 15px ' + FONT, 'z-index': '2147483645', 'pointer-events': 'none',
-      'writing-mode': 'vertical-rl', 'letter-spacing': '1px', border: '1px solid rgba(255,255,255,.15)',
-      'border-right': '0'
-    },
-    // Rahmen um das gewaehlte Element im Link-Modus
-    ring: {
-      position: 'fixed', display: 'none', left: '0', top: '0', width: '0', height: '0',
-      border: '3px solid ' + ACCENT, 'border-radius': '8px', 'box-sizing': 'border-box',
-      'box-shadow': '0 0 0 3px rgba(255,255,255,.9), 0 0 22px 4px rgba(74,144,226,.75)',
-      'pointer-events': 'none', 'z-index': '2147483644',
-      transition: 'left .12s, top .12s, width .12s, height .12s'
-    },
-    start: {
-      position: 'fixed', left: '0', top: '0', right: '0', bottom: '0', 'z-index': '2147483630',
-      background: 'linear-gradient(135deg, #0f1220 0%, #1b2340 55%, #2a1f3d 100%)', color: '#fff',
-      font: '18px/1.3 ' + FONT, overflow: 'hidden', padding: '48px 64px', 'box-sizing': 'border-box'
-    }
-  };
+  // Alle Groessen gelten fuer 720 Bildzeilen; px() rechnet sie auf die tatsaechliche
+  // Bildhoehe um (TizenBrew laeuft je nach Geraet mit 720 oder 1080 Zeilen).
+  var UI_K = 1;
+  function computeScale() { UI_K = Math.max(1, Math.min(3, (W.innerHeight || 720) / 720)); }
+  function px(n) { return Math.round(n * UI_K) + 'px'; }
+  var STYLE = null;
+  function buildStyles() {
+    return {
+      cursor: {
+        position: 'fixed', left: '0', top: '0', width: px(34), height: px(34), margin: ('-' + px(4) + ' 0 0 -' + px(4)),
+        'pointer-events': 'none', 'z-index': TOP_Z, transition: 'opacity .2s', display: 'block'
+      },
+      svg: { width: '100%', height: '100%', display: 'block', filter: ('drop-shadow(0 ' + px(1) + ' ' + px(2) + ' rgba(0,0,0,.6))') },
+      toast: {
+        position: 'fixed', right: px(32), bottom: px(32), 'max-width': '60%', padding: (px(14) + ' ' + px(24)),
+        'border-radius': px(12), background: 'rgba(20,20,24,.92)', color: '#fff',
+        font: ('600 ' + px(26) + '/1.3 ') + FONT, 'pointer-events': 'none', 'z-index': TOP_Z, opacity: '0',
+        transition: 'opacity .25s'
+      },
+      bar: {
+        // Schreibrichtung ausdruecklich links nach rechts: "all: initial" am Container setzt
+        // sie laut CSS-Standard NICHT zurueck, sonst stuende die Leiste u. U. gespiegelt.
+        position: 'fixed', left: '0', right: '0', top: '0', display: 'none', 'align-items': 'center',
+        'flex-direction': 'row', direction: 'ltr', 'unicode-bidi': 'isolate',
+        padding: (px(18) + ' ' + px(28)), background: 'rgba(20,20,24,.97)', 'z-index': '2147483642', font: (px(24) + ' ') + FONT,
+        color: '#fff', 'box-shadow': ('0 ' + px(4) + ' ' + px(16) + ' rgba(0,0,0,.5)'), 'box-sizing': 'border-box'
+      },
+      input: {
+        // darf nicht auf einen Strich zusammenfallen, wenn es eng wird
+        flex: '1 1 auto', 'min-width': '45%', font: (px(28) + ' ') + FONT, padding: (px(12) + ' ' + px(16)), 'border-radius': px(10),
+        border: (px(3) + ' solid ') + ACCENT, background: '#fff', color: '#111', outline: 'none', direction: 'ltr',
+        'box-sizing': 'border-box'
+      },
+      btn: {
+        'margin-left': px(16), padding: (px(12) + ' ' + px(22)), 'border-radius': px(10), border: (px(3) + ' solid #555'),
+        background: '#2b2f3a', color: '#fff', font: ('600 ' + px(24) + ' ') + FONT, outline: 'none', cursor: 'pointer',
+        'white-space': 'nowrap'
+      },
+      btnFocus: { background: ACCENT, 'border-color': '#fff', color: '#fff' },
+      // kuerzt sich bei Platzmangel, statt das Eingabefeld wegzudruecken
+      hint: {
+        'margin-left': px(18), 'font-size': px(18), color: '#aaa', 'white-space': 'nowrap', 'min-width': '0',
+        overflow: 'hidden', 'text-overflow': 'ellipsis'
+      },
+      menu: {
+        position: 'fixed', right: px(32), top: px(32), 'min-width': px(540), display: 'none', padding: (px(14) + ' 0'),
+        'border-radius': px(16), background: 'rgba(20,20,24,.97)', color: '#fff', font: (px(26) + '/1.3 ') + FONT,
+        'z-index': TOP_Z, 'box-shadow': ('0 ' + px(8) + ' ' + px(24) + ' rgba(0,0,0,.5)')
+      },
+      title: { padding: (px(6) + ' ' + px(28) + ' ' + px(14)), 'font-size': px(18), color: '#aaa' },
+      item: { padding: (px(14) + ' ' + px(28)) },
+      help: {
+        position: 'fixed', right: px(24), top: '50%', transform: 'translateY(-50%)', width: px(440),
+        padding: (px(22) + ' ' + px(24) + ' ' + px(18)), 'border-radius': px(22), background: 'rgba(16,18,28,.9)', color: '#fff',
+        font: (px(22) + '/1.25 ') + FONT, 'z-index': '2147483640', 'box-shadow': ('0 ' + px(10) + ' ' + px(30) + ' rgba(0,0,0,.5)'),
+        border: (px(1) + ' solid rgba(255,255,255,.12)'), 'pointer-events': 'none', 'box-sizing': 'border-box'
+      },
+      helpTab: {
+        position: 'fixed', right: '0', top: '50%', transform: 'translateY(-50%)', padding: (px(18) + ' ' + px(12)),
+        'border-radius': (px(12) + ' 0 0 ' + px(12)), background: 'rgba(16,18,28,.8)', color: '#fff',
+        font: ('600 ' + px(20) + ' ') + FONT, 'z-index': '2147483640', 'pointer-events': 'none',
+        'writing-mode': 'vertical-rl', 'letter-spacing': px(1), border: (px(1) + ' solid rgba(255,255,255,.15)'),
+        'border-right': '0'
+      },
+      // Rahmen um das gewaehlte Element im Link-Modus
+      ring: {
+        position: 'fixed', display: 'none', left: '0', top: '0', width: '0', height: '0',
+        border: (px(4) + ' solid ') + ACCENT, 'border-radius': px(10), 'box-sizing': 'border-box',
+        'box-shadow': ('0 0 0 ' + px(4) + ' rgba(255,255,255,.9), 0 0 ' + px(26) + ' ' + px(6) + ' rgba(74,144,226,.75)'),
+        'pointer-events': 'none', 'z-index': '2147483644',
+        transition: 'left .12s, top .12s, width .12s, height .12s'
+      },
+      start: {
+        position: 'fixed', left: '0', top: '0', right: '0', bottom: '0', 'z-index': '2147483630',
+        background: 'linear-gradient(135deg, #0f1220 0%, #1b2340 55%, #2a1f3d 100%)', color: '#fff',
+        font: (px(22) + '/1.3 ') + FONT, overflow: 'hidden', padding: (px(48) + ' ' + px(64)), 'box-sizing': 'border-box'
+      }
+    };
+  }
 
   function css(el, props) {
     for (var k in props) {
@@ -1744,29 +1864,29 @@
 
   function iconBox(child) {
     var box = make('div', {
-      width: '44px', height: '34px', display: 'flex', 'align-items': 'center', 'justify-content': 'center',
-      'flex-shrink': '0', 'margin-right': '12px'
+      width: px(60), height: px(46), display: 'flex', 'align-items': 'center', 'justify-content': 'center',
+      'flex-shrink': '0', 'margin-right': px(16)
     });
     box.appendChild(child);
     return box;
   }
   function svgIcon(markup, w, h) {
-    var d = make('div', { width: (w || 32) + 'px', height: (h || 32) + 'px' });
+    var d = make('div', { width: px(w || 44), height: px(h || 44) });
     d.innerHTML = markup;
     if (d.firstChild) css(d.firstChild, { width: '100%', height: '100%', display: 'block' });
     return d;
   }
   function colorKey(color) {
     return make('div', {
-      width: '30px', height: '20px', 'border-radius': '6px', background: color,
-      'box-shadow': 'inset 0 -3px 0 rgba(0,0,0,.25), 0 0 0 2px rgba(255,255,255,.25)'
+      width: px(42), height: px(28), 'border-radius': px(8), background: color,
+      'box-shadow': ('inset 0 -' + px(3) + ' 0 rgba(0,0,0,.25), 0 0 0 ' + px(2) + ' rgba(255,255,255,.25)')
     });
   }
   function keyCap(text, round) {
     return make('div', {
-      'min-width': round ? '30px' : '38px', height: '30px', padding: round ? '0' : '0 4px',
-      'border-radius': round ? '50%' : '7px', border: '2px solid rgba(255,255,255,.85)',
-      display: 'flex', 'align-items': 'center', 'justify-content': 'center', font: '700 11px ' + FONT,
+      'min-width': round ? px(42) : px(54), height: px(42), padding: round ? '0' : ('0 ' + px(6)),
+      'border-radius': round ? '50%' : px(9), border: (px(3) + ' solid rgba(255,255,255,.85)'),
+      display: 'flex', 'align-items': 'center', 'justify-content': 'center', font: ('700 ' + px(15) + ' ') + FONT,
       color: '#fff', 'box-sizing': 'border-box'
     }, text);
   }
@@ -1785,7 +1905,7 @@
     play: function () {
       return svgIcon('<svg viewBox="0 0 40 24"><path d="M3 3l12 9-12 9z" fill="#fff"/>' +
         '<rect x="22" y="3" width="5" height="18" rx="1" fill="#fff"/><rect x="31" y="3" width="5" height="18" ' +
-        'rx="1" fill="#fff"/></svg>', 40, 24);
+        'rx="1" fill="#fff"/></svg>', 54, 32);
     },
     red: function () { return colorKey('#e53935'); },
     green: function () { return colorKey('#43a047'); },
@@ -1815,10 +1935,13 @@
 
   function buildUi() {
     if (ui || !document.documentElement) return;
+    computeScale();
+    STYLE = buildStyles();
     var host = document.createElement('div');
     host.setAttribute('data-fernsurfer', VERSION);
     // Seiten-CSS darf den Container nicht verstecken oder verschieben.
-    host.style.cssText = 'all:initial !important;display:block !important;position:fixed !important;' +
+    host.style.cssText = 'all:initial !important;direction:ltr !important;unicode-bidi:isolate !important;' +
+      'display:block !important;position:fixed !important;' +
       'left:0 !important;top:0 !important;width:0 !important;height:0 !important;z-index:2147483647 !important;';
     var root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : host;
 
@@ -1832,7 +1955,6 @@
     var cursor = make('div', STYLE.cursor);
     cursor.innerHTML = CURSOR_SVG;
     if (cursor.firstChild) css(cursor.firstChild, STYLE.svg);
-    root.appendChild(cursor);
     var ring = make('div', STYLE.ring);
     root.appendChild(ring);
 
@@ -1845,56 +1967,37 @@
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('spellcheck', 'false');
     input.placeholder = 'Adresse oder Suchbegriff';
-    var goBtn = barButton('▶  Öffnen');
     var starBtn = barButton('★  Favorit');
-    var hint = make('span', STYLE.hint, 'OK = Los  ·  → = Knöpfe  ·  Zurück = Schließen');
+    starBtn.tabIndex = -1;  // wird ueber Zeiger/Link-Modus erreicht, nicht ueber den Fokus
+    var hint = make('span', STYLE.hint);
+    // Reihenfolge fest vorgeben: Eingabefeld links, Stern und Hinweis rechts
+    css(input, { order: '1' });
+    css(starBtn, { order: '2', flex: '0 0 auto' });
+    css(hint, { order: '3', flex: '0 1 auto' });
     bar.appendChild(input);
-    bar.appendChild(goBtn);
     bar.appendChild(starBtn);
     bar.appendChild(hint);
     root.appendChild(bar);
 
     var menuEl = make('div', STYLE.menu);
     root.appendChild(menuEl);
+    root.appendChild(cursor);  // zuletzt: der Zeiger liegt ueber Leiste und Menue
 
-    function barKeys(ev, handlers) {
-      var fn = handlers[ev.keyCode];
-      if (!fn && (ev.keyCode === KEY.BACK || ev.keyCode === KEY.ESC || ev.keyCode === KEY.DOWN)) fn = closeBar;
-      if (fn) { ev.preventDefault(); fn(); }
-      ev.stopPropagation();
-    }
-    var submit = function () { go(input.value); };
+    // Tastatur offen = Eingabefeld hat den Fokus. Dann bedienen die Pfeile der Fernbedienung
+    // die Bildschirmtastatur; Fernsurfer greift nur bei Fertig, Zurueck und Abbrechen ein.
+    on(input, 'focus', function () { barEditing = true; updateBarHint(); drawRing(); });
+    on(input, 'blur', function () { barEditing = false; updateBarHint(); drawRing(); });
     on(input, 'keydown', function (ev) {
-      var h = {};
-      h[KEY.ENTER] = submit;
-      h[KEY.IME_DONE] = submit;
-      // Pfeil rechts am Textende springt zu den Knoepfen
-      if (ev.keyCode === KEY.RIGHT && input.selectionStart === input.value.length &&
-          input.selectionEnd === input.value.length) {
-        h[KEY.RIGHT] = function () { goBtn.focus(); };
-      }
-      barKeys(ev, h);
-    });
-    on(goBtn, 'keydown', function (ev) {
-      var h = {};
-      h[KEY.ENTER] = submit;
-      h[KEY.LEFT] = function () { input.focus(); };
-      h[KEY.RIGHT] = function () { starBtn.focus(); };
-      h[KEY.UP] = function () {};
-      barKeys(ev, h);
-    });
-    on(starBtn, 'keydown', function (ev) {
-      var h = {};
-      h[KEY.ENTER] = addFavorite;
-      h[KEY.LEFT] = function () { goBtn.focus(); };
-      h[KEY.RIGHT] = function () {};
-      h[KEY.UP] = function () {};
-      barKeys(ev, h);
+      var k = ev.keyCode;
+      if (k === KEY.ENTER || k === KEY.IME_DONE) { ev.preventDefault(); barSubmit(); }
+      // Zurueck / Abbrechen schliesst nur die Tastatur; die Adressleiste bleibt ausgewaehlt
+      else if (k === KEY.BACK || k === KEY.ESC || k === KEY.IME_CANCEL) { ev.preventDefault(); stopEditing(); }
+      ev.stopPropagation();
     });
 
     (IS_START ? document.documentElement : (document.body || document.documentElement)).appendChild(host);
     ui = {
-      host: host, root: root, cursor: cursor, toast: t, bar: bar, input: input, goBtn: goBtn, starBtn: starBtn,
+      host: host, root: root, cursor: cursor, toast: t, bar: bar, input: input, starBtn: starBtn, hint: hint,
       menu: menuEl, help: help, helpTab: helpTab, start: start, ring: ring
     };
     drawCursor();
@@ -1923,18 +2026,18 @@
     ensureCursorPos();
     css(ui.cursor, {
       transform: 'translate(' + Math.round(cx) + 'px,' + Math.round(cy) + 'px)',
-      opacity: cursorOn && settings.mode === 'free' && !IS_START ? '1' : '0'
+      opacity: cursorOn && !IS_START ? '1' : '0'
     });
   }
 
   /* --- Tastenhilfe --- */
 
   function helpRow(icon, label, sub) {
-    var row = make('div', { display: 'flex', 'align-items': 'center', padding: '6px 0' });
+    var row = make('div', { display: 'flex', 'align-items': 'center', padding: (px(5) + ' 0') });
     row.appendChild(iconBox(icon));
     var text = make('div', { 'min-width': '0' });
-    text.appendChild(make('div', { 'font-weight': '600' }, label));
-    if (sub) text.appendChild(make('div', { 'font-size': '13px', color: '#aab' }, sub));
+    text.appendChild(make('div', { 'font-weight': '600', 'font-size': px(24) }, label));
+    if (sub) text.appendChild(make('div', { 'font-size': px(17), color: '#aab' }, sub));
     row.appendChild(text);
     return row;
   }
@@ -1944,15 +2047,16 @@
     var p = ui.help;
     p.textContent = '';
     p.appendChild(make('div', {
-      font: '700 13px ' + FONT, 'letter-spacing': '2px', color: '#9ab', 'margin-bottom': '8px'
+      font: ('700 ' + px(16) + ' ') + FONT, 'letter-spacing': px(2), color: '#9ab', 'margin-bottom': px(10)
     }, 'FERNBEDIENUNG'));
     var rows;
     if (IS_START) {
       rows = [
         [ICON.dpad(), 'Kachel wählen'],
-        [ICON.ok(), 'Öffnen'],
-        [ICON.red(), 'Adresse oder Suche', 'dort mit ★ als Favorit speichern'],
-        [ICON.blue(), 'Menü', 'Favorit entfernen']
+        [ICON.ok(), 'Öffnen', '„+“-Kachel: neuen Favoriten anlegen'],
+        [ICON.yellow(), 'Favorit entfernen', 'gewählte Kachel'],
+        [ICON.red(), 'Adresse oder Suche'],
+        [ICON.blue(), 'Menü']
       ];
     } else if (!cursorOn) {
       rows = [
@@ -1990,8 +2094,8 @@
     }
     rows.forEach(function (r) { p.appendChild(helpRow(r[0], r[1], r[2])); });
     var foot = make('div', {
-      display: 'flex', 'align-items': 'center', 'margin-top': '10px', 'padding-top': '10px',
-      'border-top': '1px solid rgba(255,255,255,.15)', 'font-size': '13px', color: '#cfd8e3'
+      display: 'flex', 'align-items': 'center', 'margin-top': px(12), 'padding-top': px(12),
+      'border-top': (px(1) + ' solid rgba(255,255,255,.15)'), 'font-size': px(17), color: '#cfd8e3'
     });
     foot.appendChild(iconBox(ICON.info()));
     foot.appendChild(make('div', {}, 'Hilfe ausblenden: INFO-Taste oder Blau → Tastenhilfe'));
@@ -2002,7 +2106,8 @@
 
   // Waehrend ein Video laeuft oder etwas im Vollbild ist, stoert die Hilfe nur.
   function helpSuppressed() {
-    return reportedPlaying || !!fsState || isNativeFullscreen();
+    // auch, solange auf der Startseite eine Rueckfrage offen ist (sonst laege die Hilfe darueber)
+    return reportedPlaying || !!fsState || isNativeFullscreen() || (IS_START && (!!pendingAdd || pendingDel >= 0));
   }
 
   function applyHelpVisibility() {
@@ -2055,7 +2160,7 @@
       var amount = Math.round(W.innerHeight / 6);
       var target = scrollableParent(document.elementFromPoint(cx, cy), sx, sy);
       // Schon oben am Rand und die Seite ist ganz oben: weiter nach oben = Adressleiste
-      if (sy < 0 && !sx && wasAtTop && !target && W.scrollY <= 0) {
+      if (sy < 0 && !sx && wasAtTop && !target && W.scrollY <= 0 && !barOpen) {
         drawCursor();
         openBar();
         return;
@@ -2078,15 +2183,23 @@
 
   function drawRing() {
     if (!ui) return;
+    drawCursor();  // der Zeiger steht im Link-Modus in der Mitte des Rahmens
     var r = null;
-    if (cursorOn && settings.mode === 'jump' && !IS_START && !fsActive()) {
-      if (innerFrame && document.documentElement.contains(innerFrame)) {
+    if (barOpen && cursorOn && (settings.mode === 'jump' || IS_START)) {
+      // Adressleiste im Link-Modus: Rahmen um Eingabefeld oder Stern, Zeiger in die Mitte
+      var be = barSel === 'star' && barMode !== 'add' ? ui.starBtn : ui.input;
+      r = be.getBoundingClientRect();
+      cx = r.left + r.width / 2;
+      cy = r.top + r.height / 2;
+      drawCursor();
+    } else if (cursorOn && settings.mode === 'jump' && !IS_START && !fsActive()) {
+      if (innerFrame && attached(innerFrame)) {
         var fr = innerFrame.getBoundingClientRect();
         r = frameRect
           ? { left: fr.left + innerFrame.clientLeft + frameRect.x, top: fr.top + innerFrame.clientTop + frameRect.y,
               width: frameRect.w, height: frameRect.h }
           : fr;
-      } else if (jumpSel && document.documentElement.contains(jumpSel)) {
+      } else if (jumpSel && attached(jumpSel)) {
         r = jumpSel.getBoundingClientRect();
       }
     }
@@ -2095,7 +2208,7 @@
       ui.host.removeAttribute('data-fernsurfer-ring');
       return;
     }
-    var pad = 4;
+    var pad = 5 * UI_K;
     css(ui.ring, {
       display: 'block', left: (r.left - pad) + 'px', top: (r.top - pad) + 'px',
       width: (r.width + pad * 2) + 'px', height: (r.height + pad * 2) + 'px'
@@ -2150,14 +2263,14 @@
 
   function jumpKeyTop(dir) {
     if (innerFrame) {
-      if (document.documentElement.contains(innerFrame) && innerFrame.contentWindow) {
+      if (attached(innerFrame) && innerFrame.contentWindow) {
         innerFrame.contentWindow.postMessage({ __tb: 'jump', dir: dir }, '*');
         return;
       }
       innerFrame = null;
     }
     // Noch nichts gewaehlt und Seite ganz oben: "hoch" heisst Adressleiste
-    if (dir === 'up' && W.scrollY <= 0 && (!jumpSel || !document.documentElement.contains(jumpSel))) {
+    if (dir === 'up' && W.scrollY <= 0 && (!jumpSel || !attached(jumpSel))) {
       openBar();
       return;
     }
@@ -2170,7 +2283,7 @@
       innerFrame.contentWindow.postMessage({ __tb: 'jok' }, '*');
       return;
     }
-    if (!jumpSel || !document.documentElement.contains(jumpSel)) {
+    if (!jumpSel || !attached(jumpSel)) {
       toast('Erst mit den Pfeiltasten ein Element wählen');
       return;
     }
@@ -2206,6 +2319,29 @@
       : 'Freier Zeiger: Pfeiltasten bewegen den Zeiger');
   }
 
+  // Fehlersuche: alles, was der Link-Modus anspringen kann, kurz gelb umrahmen
+  var debugLayer = null;
+  function showTargets() {
+    if (!ui) return;
+    if (debugLayer && debugLayer.parentNode) debugLayer.parentNode.removeChild(debugLayer);
+    debugLayer = make('div', { position: 'fixed', left: '0', top: '0', width: '0', height: '0', 'z-index': '2147483643' });
+    var targets = jumpTargets();
+    var shown = 0;
+    targets.forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      if (!onScreen(r) || shown >= 400) return;
+      shown++;
+      debugLayer.appendChild(make('div', {
+        position: 'fixed', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px',
+        border: px(2) + ' dashed #ffd600', 'box-sizing': 'border-box', 'pointer-events': 'none'
+      }));
+    });
+    ui.root.appendChild(debugLayer);
+    toast(shown + ' Elemente auf dem Bildschirm erkannt (gelb umrahmt)');
+    var layer = debugLayer;
+    later(function () { if (layer.parentNode) layer.parentNode.removeChild(layer); }, 8000);
+  }
+
   function setCursorOn(onNow) {
     cursorOn = onNow;
     if (!onNow) leaveFrame();
@@ -2232,13 +2368,32 @@
     location.href = url;
   }
 
-  function openBar() {
+  // OK / "Fertig" in der Adressleiste
+  function barSubmit() {
+    if (!ui) return;
+    if (barMode === 'add') addTypedFavorite(ui.input.value);
+    else go(ui.input.value);
+  }
+
+  // mode 'add': Adresse fuer einen neuen Favoriten (Kachel "+" auf der Startseite)
+  function openBar(mode) {
     buildUi();
     if (!ui) return;
     barOpen = true;
+    barMode = mode === 'add' ? 'add' : 'go';
     css(ui.bar, { display: 'flex' });
+    css(ui.starBtn, { display: barMode === 'add' ? 'none' : 'block' });
+    ui.input.placeholder = barMode === 'add' ? 'Adresse des neuen Favoriten, z. B. wetter.de' : 'Adresse oder Suchbegriff';
     ui.input.value = IS_START ? '' : location.href;
-    later(function () { ui.input.focus(); ui.input.select(); }, 0);
+    selectBar('input');
+    // Freier Zeiger: auf das Eingabefeld setzen, dann ist der Stern mit "rechts" erreichbar
+    if (settings.mode !== 'jump') {
+      var r = ui.input.getBoundingClientRect();
+      cx = r.left + Math.min(r.width / 2, r.width - 20 * UI_K);
+      cy = r.top + r.height / 2;
+      drawCursor();
+    }
+    later(function () { startEditing(); ui.input.select(); }, 0);
   }
 
   function closeBar() {
@@ -2246,8 +2401,131 @@
     barOpen = false;
     css(ui.bar, { display: 'none' });
     ui.input.blur();
-    ui.goBtn.blur();
-    ui.starBtn.blur();
+    selectBar('input');
+    drawRing();
+  }
+
+  // Tastatur offen? Direkt am Eingabefeld pruefen - Fokus-Ereignisse kommen nicht immer an.
+  function barIsEditing() {
+    return barEditing || (!!ui && ui.root.activeElement === ui.input);
+  }
+
+  // Tastatur oeffnen bzw. schliessen; die Adressleiste bleibt dabei ausgewaehlt
+  function startEditing() {
+    if (!ui || !barOpen) return;
+    selectBar('input');
+    ui.input.focus();
+  }
+  function stopEditing() {
+    if (!ui) return;
+    ui.input.blur();
+    barEditing = false;
+    drawRing();
+  }
+
+  function selectBar(which) {
+    barSel = which === 'star' && barMode !== 'add' ? 'star' : 'input';
+    if (ui) css(ui.starBtn, barSel === 'star' ? STYLE.btnFocus : STYLE.btn);
+    if (ui && barMode === 'add') css(ui.starBtn, { display: 'none' });
+    updateBarHint();
+    drawRing();
+  }
+
+  // Hinweis in der Leiste passend zum Zustand: Tastatur offen oder zu
+  function updateBarHint() {
+    if (!ui) return;
+    var add = barMode === 'add';
+    if (barIsEditing()) {
+      ui.hint.textContent = (add ? 'Fertig = als Kachel speichern' : 'Fertig = Öffnen') + '  ·  Zurück = Tastatur zu';
+    } else {
+      ui.hint.textContent = 'OK = Tastatur' + (add ? '' : '  ·  → = ★ Favorit') + '  ·  Zurück = Schließen';
+    }
+  }
+
+  function overEl(el, x, y) {
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  // Tasten bei offener Adressleiste und geschlossener Tastatur
+  function barKey(code, consume) {
+    if (code === KEY.ESC) code = KEY.BACK;
+    if (code === KEY.BACK || code === KEY.RED) { consume(); closeBar(); return true; }
+    var linkLike = settings.mode === 'jump' || IS_START || !cursorOn;
+    if (linkLike) {
+      // Link-Modus: links/rechts zwischen Eingabefeld und Stern, runter schliesst die Leiste
+      if (code === KEY.LEFT) { consume(); selectBar('input'); return true; }
+      if (code === KEY.RIGHT) { consume(); selectBar('star'); return true; }
+      if (code === KEY.UP) { consume(); return true; }
+      if (code === KEY.DOWN) { consume(); closeBar(); return true; }
+      if (code === KEY.ENTER) {
+        consume();
+        if (barSel === 'star') addFavorite(); else startEditing();
+        return true;
+      }
+      return false;
+    }
+    // Freier Zeiger: Pfeile bewegen den Zeiger ganz normal, OK klickt, wo er steht
+    if (code === KEY.LEFT) { consume(); moveCursor(-1, 0); return true; }
+    if (code === KEY.RIGHT) { consume(); moveCursor(1, 0); return true; }
+    if (code === KEY.UP) { consume(); moveCursor(0, -1); return true; }
+    if (code === KEY.DOWN) { consume(); moveCursor(0, 1); return true; }
+    if (code === KEY.ENTER) {
+      consume();
+      if (overEl(ui.input, cx, cy)) startEditing();
+      else if (barMode !== 'add' && overEl(ui.starBtn, cx, cy)) addFavorite();
+      else if (!overEl(ui.bar, cx, cy)) { closeBar(); clickAt(cx, cy); }
+      return true;
+    }
+    return false;
+  }
+
+  /* --- "Fertig" der Bildschirmtastatur wie Enter behandeln --- */
+
+  var lastEditable = null;
+  var syntheticKey = false;
+  function noteEditable(ev) { if (isEditable(ev.target)) lastEditable = ev.target; }
+  on(W, 'focusin', noteEditable, true);
+  on(W, 'input', noteEditable, true);  // Tippen meldet das Feld auch ohne Fokus-Ereignis
+
+  // Feld einer Seite abschicken: erst Enter-Tasten fuer Seiten, die selbst darauf
+  // hoeren; wenn keine reagiert, das Formular ueber seinen Absende-Knopf.
+  function submitField(el) {
+    var handled = false;
+    syntheticKey = true;
+    try {
+      ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+        var e = new KeyboardEvent(type, { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter' });
+        try {
+          Object.defineProperty(e, 'keyCode', { get: function () { return 13; } });
+          Object.defineProperty(e, 'which', { get: function () { return 13; } });
+        } catch (x) {}
+        if (!el.dispatchEvent(e)) handled = true;
+      });
+    } finally {
+      syntheticKey = false;
+    }
+    if (handled) return;
+    var form = el.form || (el.closest && el.closest('form'));
+    if (!form) return;
+    var btn = form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+    if (btn) {
+      ownClick = true;
+      try { btn.click(); } finally { ownClick = false; }
+    } else if (form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) {
+      form.submit();
+    }
+  }
+
+  function imeDone(target) {
+    if (barOpen) { barSubmit(); return true; }
+    var el = isEditable(target) ? target
+      : isEditable(document.activeElement) ? document.activeElement : lastEditable;
+    if (!el || !attached(el)) return false;
+    submitField(el);
+    // Tastatur ist zu: Feld verlassen, damit die Pfeile wieder den Zeiger bewegen
+    try { if (attached(el) && document.activeElement === el) el.blur(); } catch (e) {}
+    return true;
   }
 
   function hostOf(url) {
@@ -2258,13 +2536,7 @@
   // die Startseite fragt nach und kehrt danach zur Seite zurueck.
   function addFavorite() {
     if (IS_START) {
-      var typed = normalizeUrl(ui.input.value);
-      if (!typed || typed.indexOf(SEARCH) === 0) {
-        toast('Erst eine Adresse eingeben, dann ★');
-        return;
-      }
-      closeBar();
-      askAddFavorite({ u: typed, t: hostOf(typed) }, false);
+      addTypedFavorite(ui.input.value);
       return;
     }
     var fav = { u: location.href, t: (document.title || HOST).trim().slice(0, 80) || HOST };
@@ -2281,7 +2553,31 @@
   var TILE_COLORS = ['#e53935', '#8e24aa', '#3949ab', '#039be5', '#00897b', '#7cb342', '#f4511e', '#6d4c41'];
   var favs = [];
   var startSel = -1;      // -1 = Suchfeld, sonst Kachel
-  var pendingAdd = null;  // { fav, back } - Favorit wartet auf Bestaetigung
+  var pendingAdd = null;  // { fav, back } - Favorit von einer anderen Seite wartet auf Bestaetigung
+  var pendingDel = -1;    // Kachel, deren Loeschen gerade bestaetigt werden soll
+
+  // Auf der Startseite eingegebene Adresse direkt als Kachel speichern (ohne sie zu oeffnen)
+  function addTypedFavorite(text) {
+    var url = normalizeUrl(text);
+    if (!url || url.indexOf(SEARCH) === 0) {
+      toast('Bitte eine Adresse eingeben, z. B. wetter.de');
+      return;
+    }
+    closeBar();
+    var at = -1;
+    for (var i = 0; i < favs.length; i++) if (favs[i].u === url) at = i;
+    if (at >= 0) {
+      startSel = at;
+      toast('Schon in deinen Favoriten');
+    } else {
+      favs.push({ u: url, t: hostOf(url) });
+      if (saveFavs()) {
+        startSel = favs.length - 1;
+        toast('★ Als Kachel gespeichert: ' + hostOf(url));
+      }
+    }
+    renderStart();
+  }
 
   function validFav(f) {
     return !!f && typeof f.u === 'string' && /^https?:\/\//i.test(f.u) && f.u.length < 2000 && typeof f.t === 'string';
@@ -2320,9 +2616,9 @@
   }
 
   function startCols() {
-    var avail = W.innerWidth - 128 - 340;  // Rand und Platz fuer die Tastenhilfe
-    if (!settings.help) avail += 340;
-    return Math.max(2, Math.floor((avail + 20) / (220 + 20)));
+    var avail = W.innerWidth - (128 + 480) * UI_K;  // Rand und Platz fuer die Tastenhilfe
+    if (!settings.help) avail += 480 * UI_K;
+    return Math.max(2, Math.floor((avail + 20 * UI_K) / (220 * UI_K)));
   }
 
   // Der Symbol-Dienst kennt meist nur die Hauptdomain (duckduckgo.com statt
@@ -2336,15 +2632,15 @@
 
   function tileIcon(f, i) {
     var wrap = make('div', {
-      width: '56px', height: '56px', 'border-radius': '14px', background: TILE_COLORS[i % TILE_COLORS.length],
-      display: 'flex', 'align-items': 'center', 'justify-content': 'center', font: '700 26px ' + FONT,
-      color: '#fff', overflow: 'hidden', 'margin-bottom': '12px'
+      width: px(56), height: px(56), 'border-radius': px(14), background: TILE_COLORS[i % TILE_COLORS.length],
+      display: 'flex', 'align-items': 'center', 'justify-content': 'center', font: ('700 ' + px(26) + ' ') + FONT,
+      color: '#fff', overflow: 'hidden', 'margin-bottom': px(12)
     }, (hostOf(f.u).charAt(0) || '?').toUpperCase());
     // Favicon ueber den Symbol-Dienst von DuckDuckGo: Die Startseite liegt auf
     // DuckDuckGo, dessen Sicherheitsregel nur Bilder von DuckDuckGo-Adressen erlaubt.
     // Klappt das nicht, bleibt der farbige Anfangsbuchstabe.
     try {
-      var img = make('img', { width: '40px', height: '40px', display: 'none' });
+      var img = make('img', { width: px(40), height: px(40), display: 'none' });
       on(img, 'load', function () {
         if (img.naturalWidth > 1) {
           wrap.textContent = '';
@@ -2363,95 +2659,114 @@
     var el = ui.start;
     el.textContent = '';
 
-    var head = make('div', { display: 'flex', 'align-items': 'baseline', 'margin-bottom': '28px' });
-    head.appendChild(make('div', { font: '700 40px ' + FONT, 'letter-spacing': '1px' }, 'Fernsurfer'));
+    var head = make('div', { display: 'flex', 'align-items': 'baseline', 'margin-bottom': px(28) });
+    head.appendChild(make('div', { font: ('700 ' + px(46) + ' ') + FONT, 'letter-spacing': px(1) }, 'Fernsurfer'));
     var now = new Date();
-    head.appendChild(make('div', { 'margin-left': '24px', font: '300 28px ' + FONT, color: '#aab' },
+    head.appendChild(make('div', { 'margin-left': px(24), font: ('300 ' + px(32) + ' ') + FONT, color: '#aab' },
       ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2)));
     el.appendChild(head);
 
     var searchSel = startSel === -1 && !pendingAdd;
     var search = make('div', {
-      display: 'flex', 'align-items': 'center', width: '640px', 'max-width': '100%', padding: '16px 22px',
-      'border-radius': '40px', background: searchSel ? '#fff' : 'rgba(255,255,255,.12)',
-      color: searchSel ? '#111' : '#dde', font: '22px ' + FONT, 'margin-bottom': '36px',
-      'box-shadow': searchSel ? '0 0 0 4px ' + ACCENT : 'none', 'box-sizing': 'border-box'
+      display: 'flex', 'align-items': 'center', width: px(640), 'max-width': '100%', padding: (px(16) + ' ' + px(22)),
+      'border-radius': px(40), background: searchSel ? '#fff' : 'rgba(255,255,255,.12)',
+      color: searchSel ? '#111' : '#dde', font: (px(26) + ' ') + FONT, 'margin-bottom': px(36),
+      'box-shadow': searchSel ? ('0 0 0 ' + px(4) + ' ') + ACCENT : 'none', 'box-sizing': 'border-box'
     });
     search.appendChild(svgIcon('<svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5" fill="none" stroke="' +
       (searchSel ? '#111' : '#dde') + '" stroke-width="2.4"/><path d="M15 15l6 6" stroke="' +
-      (searchSel ? '#111' : '#dde') + '" stroke-width="2.4" stroke-linecap="round"/></svg>', 26, 26));
-    search.appendChild(make('div', { 'margin-left': '14px' }, 'Suchen oder Adresse eingeben'));
+      (searchSel ? '#111' : '#dde') + '" stroke-width="2.4" stroke-linecap="round"/></svg>', 30, 30));
+    search.appendChild(make('div', { 'margin-left': px(14) }, 'Suchen oder Adresse eingeben'));
     el.appendChild(search);
 
     el.appendChild(make('div', {
-      font: '700 14px ' + FONT, 'letter-spacing': '2px', color: '#9ab', 'margin-bottom': '14px'
+      font: ('700 ' + px(17) + ' ') + FONT, 'letter-spacing': px(2), color: '#9ab', 'margin-bottom': px(14)
     }, 'FAVORITEN'));
 
-    var grid = make('div', { display: 'flex', 'flex-wrap': 'wrap', width: (startCols() * 240) + 'px' });
+    var grid = make('div', { display: 'flex', 'flex-wrap': 'wrap', width: (startCols() * 220 * UI_K) + 'px' });
     var items = favs.concat([{ plus: true }]);
     items.forEach(function (f, i) {
       var sel = i === startSel && !pendingAdd;
       var tile = make('div', {
-        width: '220px', height: '160px', margin: '0 20px 20px 0', 'border-radius': '18px', padding: '18px',
+        width: px(200), height: px(150), margin: ('0 ' + px(20) + ' ' + px(20) + ' 0'), 'border-radius': px(18), padding: px(16),
         'box-sizing': 'border-box', background: sel ? ACCENT : 'rgba(255,255,255,.08)',
-        'box-shadow': sel ? '0 0 0 4px #fff, 0 12px 28px rgba(0,0,0,.45)' : 'none',
+        'box-shadow': sel ? ('0 0 0 ' + px(4) + ' #fff, 0 ' + px(12) + ' ' + px(28) + ' rgba(0,0,0,.45)') : 'none',
         transform: sel ? 'scale(1.06)' : 'none', transition: 'transform .12s', display: 'flex',
         'flex-direction': 'column', 'justify-content': 'flex-end', overflow: 'hidden'
       });
       if (f.plus) {
-        tile.appendChild(make('div', { font: '300 52px/1 ' + FONT, 'margin-bottom': '14px', color: '#cde' }, '+'));
+        tile.appendChild(make('div', { font: ('300 ' + px(52) + '/1 ') + FONT, 'margin-bottom': px(14), color: '#cde' }, '+'));
         tile.appendChild(make('div', { 'font-weight': '600' }, 'Favorit hinzufügen'));
-        tile.appendChild(make('div', { 'font-size': '13px', color: sel ? '#eef' : '#aab' }, 'Adresse eingeben, dann ★'));
+        tile.appendChild(make('div', { 'font-size': px(16), color: sel ? '#eef' : '#aab' }, 'Adresse eingeben'));
       } else {
         tile.appendChild(tileIcon(f, i));
         tile.appendChild(make('div', {
           'font-weight': '600', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis'
         }, f.t || hostOf(f.u)));
         tile.appendChild(make('div', {
-          'font-size': '13px', color: sel ? '#eef' : '#aab', 'white-space': 'nowrap', overflow: 'hidden',
+          'font-size': px(16), color: sel ? '#eef' : '#aab', 'white-space': 'nowrap', overflow: 'hidden',
           'text-overflow': 'ellipsis'
         }, hostOf(f.u)));
       }
       grid.appendChild(tile);
       if (sel) later(function () { try { tile.scrollIntoView({ block: 'nearest' }); } catch (e) {} }, 0);
     });
-    var scroller = make('div', { 'max-height': (W.innerHeight - 330) + 'px', 'overflow-y': 'auto', padding: '6px' });
+    var scroller = make('div', { 'max-height': (W.innerHeight - 330 * UI_K) + 'px', 'overflow-y': 'hidden', padding: px(6) });
     scroller.appendChild(grid);
     el.appendChild(scroller);
 
     if (pendingAdd) el.appendChild(renderConfirm());
+    else if (pendingDel >= 0 && pendingDel < favs.length) el.appendChild(renderDeleteConfirm());
+    applyHelpVisibility();
   }
 
-  function renderConfirm() {
-    var f = pendingAdd.fav;
-    var exists = favs.some(function (x) { return x.u === f.u; });
+  function confirmCard(title, fav, idx, okText, backText) {
     var shade = make('div', {
       position: 'fixed', left: '0', top: '0', right: '0', bottom: '0', background: 'rgba(0,0,0,.6)',
       display: 'flex', 'align-items': 'center', 'justify-content': 'center'
     });
     var card = make('div', {
-      width: '560px', padding: '28px 32px', 'border-radius': '20px', background: '#1d2233',
-      'box-shadow': '0 20px 50px rgba(0,0,0,.6)', border: '1px solid rgba(255,255,255,.15)'
+      width: px(620), padding: (px(30) + ' ' + px(34)), 'border-radius': px(20), background: '#1d2233',
+      'box-shadow': ('0 ' + px(20) + ' ' + px(50) + ' rgba(0,0,0,.6)'), border: (px(1) + ' solid rgba(255,255,255,.15)')
     });
-    card.appendChild(make('div', { font: '700 26px ' + FONT, 'margin-bottom': '18px' },
-      exists ? 'Schon in deinen Favoriten' : '★  Als Favorit speichern?'));
-    var row = make('div', { display: 'flex', 'align-items': 'center', 'margin-bottom': '24px' });
-    row.appendChild(tileIcon(f, favs.length));
-    var txt = make('div', { 'margin-left': '16px', 'min-width': '0' });
-    txt.appendChild(make('div', { 'font-weight': '600', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }, f.t));
-    txt.appendChild(make('div', { 'font-size': '14px', color: '#aab', 'word-break': 'break-all' }, f.u.slice(0, 120)));
+    card.appendChild(make('div', { font: ('700 ' + px(30) + ' ') + FONT, 'margin-bottom': px(20) }, title));
+    var row = make('div', { display: 'flex', 'align-items': 'center', 'margin-bottom': px(26) });
+    row.appendChild(tileIcon(fav, idx));
+    var txt = make('div', { 'margin-left': px(18), 'min-width': '0', 'font-size': px(22) });
+    txt.appendChild(make('div', { 'font-weight': '600', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }, fav.t || hostOf(fav.u)));
+    txt.appendChild(make('div', { 'font-size': px(16), color: '#aab', 'word-break': 'break-all' }, fav.u.slice(0, 120)));
     row.appendChild(txt);
     card.appendChild(row);
-    var keys = make('div', { display: 'flex', 'align-items': 'center', color: '#cfd8e3' });
+    var keys = make('div', { display: 'flex', 'align-items': 'center', color: '#cfd8e3', 'font-size': px(22) });
     keys.appendChild(iconBox(ICON.ok()));
-    keys.appendChild(make('div', { 'margin-right': '28px' }, exists ? 'Zurück zur Seite' : 'Speichern'));
-    if (!exists) {
+    keys.appendChild(make('div', { 'margin-right': px(32) }, okText));
+    if (backText) {
       keys.appendChild(iconBox(ICON.back()));
-      keys.appendChild(make('div', {}, 'Abbrechen'));
+      keys.appendChild(make('div', {}, backText));
     }
     card.appendChild(keys);
     shade.appendChild(card);
     return shade;
+  }
+
+  function renderDeleteConfirm() {
+    return confirmCard('Favorit entfernen?', favs[pendingDel], pendingDel, 'Entfernen', 'Abbrechen');
+  }
+
+  function askDelete() {
+    if (startSel < 0 || startSel >= favs.length) {
+      toast('Wähle zuerst die Kachel, die weg soll');
+      return;
+    }
+    pendingDel = startSel;
+    renderStart();
+  }
+
+  function renderConfirm() {
+    var f = pendingAdd.fav;
+    var exists = favs.some(function (x) { return x.u === f.u; });
+    return confirmCard(exists ? 'Schon in deinen Favoriten' : '★  Als Favorit speichern?', f, favs.length,
+      exists ? 'Zurück zur Seite' : 'Speichern', exists ? '' : 'Abbrechen');
   }
 
   function askAddFavorite(fav, back) {
@@ -2487,6 +2802,12 @@
       else if (code === KEY.BACK) finishAdd(false);
       return;
     }
+    if (pendingDel >= 0) {
+      var del = pendingDel;
+      if (code === KEY.ENTER) { pendingDel = -1; removeFavorite(del); }
+      else if (code === KEY.BACK) { pendingDel = -1; renderStart(); }
+      return;
+    }
     var n = favs.length + 1;  // plus "Favorit hinzufuegen"
     var cols = startCols();
     var i = startSel;
@@ -2500,7 +2821,8 @@
         else if (Math.floor(i / cols) < Math.floor((n - 1) / cols)) i = n - 1;
         break;
       case KEY.ENTER:
-        if (i < 0 || i === n - 1) openBar();
+        if (i < 0) openBar();
+        else if (i === n - 1) openBar('add');
         else location.href = favs[i].u;
         return;
       case KEY.BACK:
@@ -2524,7 +2846,7 @@
 
   if (IS_START) {
     try { document.documentElement.style.setProperty('background', '#0f1220', 'important'); } catch (e) {}
-    every(function () { if (ui && ui.start && !pendingAdd && !menu) renderStart(); }, 30000);
+    every(function () { if (ui && ui.start && !pendingAdd && pendingDel < 0 && !menu && !barOpen) renderStart(); }, 30000);
   }
 
   /* --- Menue (blaue Taste) --- */
@@ -2581,6 +2903,7 @@
           label: cursorOn ? 'Zeiger ausschalten (Seite steuert selbst)' : 'Zeiger einschalten',
           run: function () { setCursorOn(!cursorOn); }
         },
+        { label: 'Erkannte Elemente zeigen (Link-Modus)', run: showTargets },
         { label: 'Seite neu laden', run: function () { location.reload(); } },
         {
           label: DISABLED ? 'Werbeblocker hier einschalten' : 'Werbeblocker hier ausschalten',
@@ -2639,7 +2962,10 @@
       if (ev) { ev.preventDefault(); ev.stopImmediatePropagation(); }
     }
 
-    if (barOpen) return; // die Adressleiste behandelt ihre Tasten selbst
+    if (barOpen) {
+      if (barIsEditing()) return;  // Tastatur offen: die Tasten gehoeren dem Eingabefeld
+      if (barKey(code, consume)) return;
+    }
     if (code === KEY.ESC) code = KEY.BACK; // PC-Tastatur zum Testen
 
     if (menu) { consume(); menuKey(code); return; }
@@ -2655,7 +2981,11 @@
         if (!cursorOn) setCursorOn(true);
         else setMode(settings.mode === 'jump' ? 'free' : 'jump');
         return;
-      case KEY.YELLOW: consume(); if (!IS_START) location.href = START; return;
+      case KEY.YELLOW:
+        consume();
+        if (!IS_START) location.href = START;
+        else if (!pendingAdd && pendingDel < 0) askDelete();  // Startseite: Kachel entfernen
+        return;
       case KEY.BLUE: consume(); openMenu(); return;
     }
 
@@ -2708,8 +3038,24 @@
   }
 
   on(W, 'keydown', function (ev) {
+    if (syntheticKey) return;  // eigene Enter-Tasten fuer Seitenfelder
     userActed = true;
     if (!ui) buildUi();
+    // "Fertig" der Bildschirmtastatur: kommt je nach Firmware am Feld oder an der
+    // Seite an, nachdem die Tastatur das Feld schon verlassen hat
+    if (ev.keyCode === KEY.IME_DONE && imeDone(ev.target)) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
+    // "Abbrechen" der Bildschirmtastatur: nur die Tastatur schliessen, das Feld bleibt gewaehlt
+    if (ev.keyCode === KEY.IME_CANCEL) {
+      if (barOpen) stopEditing();
+      else if (isEditable(document.activeElement)) document.activeElement.blur();
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
     handleKey(ev.keyCode, ev);
   }, true);
 

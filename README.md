@@ -21,42 +21,53 @@ Neue Versionen kommen von selbst an. Starte den Fernseher danach einmal neu.
 
 TizenBrew → **Fernsurfer** auswählen → die **Startseite mit deinen Favoriten** öffnet sich im Vollbild. Ab dann läuft Fernsurfer auf jeder Seite, die du ansurfst, auch in eingebetteten Playern. Beenden kannst du es mit der Home-Taste.
 
-Rechts auf dem Bildschirm zeigt eine **Tastenhilfe**, was welche Taste macht. Mit der **INFO-Taste** oder über **Blau → Tastenhilfe** blendest du sie aus und wieder ein. Solange ein Video läuft oder etwas im Vollbild ist, verschwindet sie von selbst und kommt beim Pausieren wieder. Stumme Hintergrund- und Vorschauvideos, die Seiten von selbst abspielen, zählen dabei nicht.
+Rechts auf dem Bildschirm zeigt eine **Tastenhilfe**, was welche Taste macht. Sie ist für den Abstand vom Sofa gemacht: Alle Größen richten sich nach der Bildhöhe, auf einem 1080er-Bild ist alles 1,5-mal so groß wie auf einem 720er. Mit der **INFO-Taste** oder über **Blau → Tastenhilfe** blendest du sie aus und wieder ein. Solange ein Video läuft oder etwas im Vollbild ist, verschwindet sie von selbst und kommt beim Pausieren wieder. Stumme Hintergrund- und Vorschauvideos, die Seiten von selbst abspielen, zählen dabei nicht.
 
 ## Startseite und Favoriten
 
 - Die Startseite ist `https://html.duckduckgo.com/html/?fernsurfer`. Das Merkmal `?fernsurfer` erkennt Fernsurfer und legt seine eigene Oberfläche über die Seite: nur Suchfeld und Favoriten als Kacheln. Normale DuckDuckGo-Suchen bleiben davon unberührt.
 - Pfeiltasten wählen eine Kachel, OK öffnet sie. Ganz oben ist das Suchfeld.
-- **Favorit speichern:** auf einer Seite Rot drücken (Adressleiste) → mit → zum Knopf **★ Favorit** → OK. Es erscheint eine Nachfrage auf der Startseite, danach geht es zurück zur Seite. Alternativ geht das über Blau → „Zu Favoriten hinzufügen“.
-- **Favorit entfernen:** auf der Startseite die Kachel wählen → Blau → „Favorit entfernen“.
+- **Neuer Favorit auf der Startseite:** Kachel **„+ Favorit hinzufügen“** → Adresse eintippen → OK bzw. „Fertig“. Die Adresse wird direkt als Kachel gespeichert, ohne die Seite zu öffnen.
+- **Favorit von einer Seite aus speichern:** auf der Seite Rot drücken (Adressleiste) → mit → zum Knopf **★ Favorit** → OK. Es erscheint eine Nachfrage auf der Startseite, danach geht es zurück zur Seite. Alternativ geht das über Blau → „Zu Favoriten hinzufügen“.
+- **Favorit entfernen:** auf der Startseite die Kachel wählen → **Gelb** → mit OK bestätigen. Alternativ geht das über Blau → „Favorit entfernen“.
 - Die Favoriten liegen im Speicher dieser Seite (localStorage von `html.duckduckgo.com`) auf dem Fernseher. Die Symbole der Kacheln kommen vom Symbol-Dienst `icons.duckduckgo.com`. Andere Bildquellen erlaubt DuckDuckGo auf seiner Seite nicht. DuckDuckGo erfährt dadurch, welche Domains in deinen Favoriten stehen.
 
 ## Tasten
 
 | Taste | Funktion |
 |---|---|
-| Pfeiltasten | **Link-Modus** (Standard): zum nächsten anklickbaren Element in dieser Richtung springen. **Freier Zeiger:** Zeiger bewegen (gedrückt halten = schneller). Auf der Startseite: Kachel wählen |
+| Pfeiltasten | **Freier Zeiger** (Standard): Zeiger bewegen (gedrückt halten = schneller). **Link-Modus:** zum nächsten anklickbaren Element in dieser Richtung springen. Auf der Startseite: Kachel wählen |
 | Hoch ganz oben | Adressleiste (in jedem Modus, wenn die Seite ganz oben ist); Runter schließt sie |
-| OK | Gewähltes Element anklicken (Textfelder öffnen die TV-Tastatur); auf einem eingebetteten Player: Video starten und hineingehen |
+| OK | Anklicken (Textfelder öffnen die TV-Tastatur); im Link-Modus auf einem eingebetteten Player: Video starten und hineingehen |
+| „Fertig“ der TV-Tastatur | Wie OK bzw. Enter: öffnet die Adresse in der Adressleiste und schickt Suchfelder auf Webseiten ab |
 | Zurück | Beendet das Vollbild, verlässt einen Player, Textfelder und Menüs, sonst vorherige Seite |
-| Rot | Adressleiste: Adresse oder Suchbegriff, mit den Knöpfen **▶ Öffnen** und **★ Favorit** (mit → erreichbar) |
-| Grün | Wechselt zwischen **Link-Modus** und **freiem Zeiger** (die Wahl bleibt gespeichert) |
-| Gelb | Startseite (Favoriten) |
-| Blau | Menü: Video als Vollbild, Favorit hinzufügen, Tastenhilfe, Zeiger aus/an, neu laden, **Werbeblocker auf dieser Seite aus/an** |
+| Rot | Adressleiste (Details siehe unten): „Fertig“ öffnet, bei geschlossener Tastatur → zum Knopf **★ Favorit** |
+| Grün | Wechselt zwischen **freiem Zeiger** und **Link-Modus** (die Wahl bleibt gespeichert) |
+| Gelb | Startseite (Favoriten); auf der Startseite: gewählte Kachel entfernen |
+| Blau | Menü: Video als Vollbild, Favorit hinzufügen, Tastenhilfe, Zeiger aus/an, erkannte Elemente zeigen, neu laden, **Werbeblocker auf dieser Seite aus/an** |
 | INFO | Tastenhilfe aus- und einblenden |
 | Play/Pause, Stop, Spulen | Steuern das laufende Video (±10 s), auch in eingebetteten Playern |
 | Im Vollbild | ← → spulen ±10 s, OK = Play/Pause, Zurück beendet das Vollbild |
 
+## Adressleiste
+
+Rot (oder Hoch ganz oben) öffnet die Leiste, und die Bildschirmtastatur geht gleich mit auf.
+
+- **Tastatur offen:** Die Pfeiltasten der Fernbedienung bedienen die Bildschirmtastatur. Den Textcursor bewegst du mit den Pfeilen *in* der Bildschirmtastatur, Fernsurfer greift hier nicht ein. **„Fertig“** öffnet die Adresse. **Zurück** bzw. „Abbrechen“ schließt nur die Tastatur, die Leiste bleibt ausgewählt.
+- **Tastatur zu, Leiste ausgewählt:**
+  - Im **Link-Modus** springt → zum **★ Favorit** und ← zurück zum Eingabefeld. OK auf dem Eingabefeld öffnet die Tastatur wieder, OK auf dem Stern speichert die Seite als Favorit. Runter oder Zurück schließt die Leiste.
+  - Mit dem **freien Zeiger** bewegen die Pfeile ganz normal den Zeiger. OK auf dem Eingabefeld öffnet die Tastatur, OK auf dem Stern speichert den Favoriten. Ein Klick außerhalb der Leiste schließt sie und klickt dort. Zurück schließt die Leiste.
+
 ## Link-Modus
 
-Wie im Link-Modus des Samsung-Browsers springen die Pfeiltasten von Element zu Element. Das gewählte Element bekommt einen blauen Rahmen.
+Wie im Link-Modus des Samsung-Browsers springen die Pfeiltasten von Element zu Element. Einschalten kannst du ihn mit **Grün**. Das gewählte Element bekommt einen blauen Rahmen, und der Zeiger springt in dessen Mitte.
 
-- **Ziele** sind Links, Knöpfe, Eingabefelder, Videos und eingebettete Player, außerdem Elemente, die die Seite als anklickbar kennzeichnet (Rolle „Button“, „Hand“-Mauszeiger, Klick-Funktion). Verdeckte Elemente, etwa hinter einem Dialog, werden übersprungen.
-- Gesprungen wird zum nächsten Ziel in der gedrückten Richtung, bevorzugt in derselben Zeile bzw. Spalte.
+- **Ziele** sind Links, Knöpfe, Eingabefelder, Videos und eingebettete Player, außerdem Elemente, die die Seite als anklickbar kennzeichnet (Rolle „Button“, „Hand“-Mauszeiger, Klick-Funktion). Auch Knöpfe in Web-Komponenten (offenes Shadow DOM) werden gefunden. Verdeckte Elemente, etwa hinter einem Dialog, werden übersprungen.
+- Gesprungen wird zum nächsten Ziel in der gedrückten Richtung, bevorzugt in derselben Zeile bzw. Spalte. Der erste Sprung beginnt oben links.
 - Liegt das nächste Ziel außerhalb des Bildschirms, scrollt die Seite zuerst ein Stück. So wird längerer Text dazwischen nicht übersprungen.
-- **Video auf der Seite:** Das Videobild ist ein eigenes Ziel (OK = Play/Pause). Runter führt zu den Knöpfen des Players, Hoch zurück zum Video. Damit die Knöpfe sichtbar bleiben, simuliert Fernsurfer Mausbewegungen.
+- **Video auf der Seite:** Der **ganze Player** (Video und Bedienleiste) ist ein Ziel, OK = Play/Pause. Runter führt zu den Knöpfen des Players, Hoch zurück zum ganzen Player. Damit eingeblendete Knöpfe erscheinen und sichtbar bleiben, simuliert Fernsurfer Mausbewegungen. Knöpfe im Player werden auch dann erkannt, wenn sie nur an ihrem Namen erkennbar sind (etwa `vjs-play-control`), wenn eine durchsichtige Klick-Schicht darüber liegt oder wenn der Player in einem anklickbaren Rahmen steckt.
 - **Eingebetteter Player (iframe):** Von außen ist der Player ein einziges Ziel. OK startet das Video und geht hinein, danach springen die Pfeiltasten zwischen den Knöpfen im Player. Zurück oder ein Sprung über den Rand hinaus verlässt ihn wieder.
-- Bei Playern, deren Knöpfe nicht als Elemente erkennbar sind, hilft **Grün** (freier Zeiger). Die Play-, Pause- und Spultasten funktionieren immer.
+- **Fehlt etwas?** Blau → „Erkannte Elemente zeigen“ umrahmt einige Sekunden lang alles, was der Link-Modus anspringen kann, gelb gestrichelt. Was dort nicht umrahmt ist, erreichst du mit dem freien Zeiger (Grün). Die Play-, Pause- und Spultasten funktionieren immer.
 
 ## Videoplayer
 
@@ -100,24 +111,10 @@ Quellen:
 
 Danach erhöhst du `version` in `package.json` und lädst die geänderten Dateien hoch. TizenBrew holt sie über jsDelivr, das einige Stunden zwischenspeichert.
 
-### Testen am PC
-
-```
-python -I tools/build.py LISTEN... test/test-rules.txt --net --start "http://127.0.0.1:8765/test/start.html?fernsurfer" --out test/userScript.test.js
-python -m http.server 8765 --bind 127.0.0.1
-```
-
-- `http://127.0.0.1:8765/test/start.html?fernsurfer`: Favoriten-Startseite (mit Sicherheitsregel wie bei DuckDuckGo)
-- `http://127.0.0.1:8765/test/video.html`: Videoplayer mit Klick-Schicht und Vollbild-Knopf, direkt und im fremden iframe
-- `http://127.0.0.1:8765/test/jump.html`: Link-Modus (Zeilen, Kacheln ohne Kennzeichnung, langer Text, Player mit Knöpfen, eingebetteter Player)
-
-- `http://127.0.0.1:8765/test/filters.html`: Filter, Scriptlets, Ausnahmen, Netzwerk-Sperre
-- `http://127.0.0.1:8765/test/index.html`: Popups, Klick-Falle, Zeiger, fremder Player im iframe
-- `http://127.0.0.1:8765/test/csp.html`: Seite mit Content-Security-Policy und Autofokus (wie DuckDuckGo)
-- `http://127.0.0.1:8765/test/tizenbrew-ui/dist/index.html`: Nachbildung der TizenBrew-Oberfläche, dort darf Fernsurfer nichts tun
-
 ## Änderungen
 
+- **1.3.1:** Adressleiste mit zwei Zuständen (Tastatur offen / zu), → erreicht den Stern bei geschlossener Tastatur. Die Leiste erzwingt die Schreibrichtung links nach rechts und das Eingabefeld kann nicht mehr zusammenfallen (mögliche Ursachen für den Stern links). „Abbrechen“ der Bildschirmtastatur schließt nur die Tastatur.
+- **1.3.0:** Freier Zeiger wieder Standard, im Link-Modus springt der Zeiger mit in die Mitte des Rahmens. Link-Modus erkennt ganze Player und ihre Knöpfe deutlich besser (versteckte Leisten, Klick-Schichten, unbeschriftete Knöpfe, Shadow DOM, anklickbare Rahmen), dazu Blau → „Erkannte Elemente zeigen“. Adressleiste ohne „Öffnen“-Knopf, „Fertig“ der TV-Tastatur bestätigt überall, auch in Suchfeldern auf Webseiten. Neue Favoriten über die „+“-Kachel werden direkt gespeichert, Gelb entfernt eine Kachel. Größere Tastenhilfe und Oberfläche, abhängig von der Bildhöhe.
 - **1.2.0:** Link-Modus wie im Samsung-Browser (Standard). Grün wechselt zum freien Zeiger. Eingebettete Player lassen sich betreten und verlassen, im Vollbild spulen ← →, OK pausiert. Zeiger aus/an über das Menü.
 - **1.1.0:** Favoriten-Startseite (auf DuckDuckGo) mit Kacheln und ★-Knopf in der Adressleiste. Adressleiste mit Knopf **▶ Öffnen**; „Fertig“ auf der TV-Tastatur öffnet die Adresse. Tastenhilfe rechts (INFO-Taste), die bei laufendem Video und im Vollbild verschwindet. Videoplayer: Klick-Schichten werden weggeräumt, Video startet per OK, eigenes Vollbild; Play/Pause trifft das laufende Video, auch in eingebetteten Playern.
 - **1.0.1:** Zeiger, Adressleiste und Werbefilter funktionieren auf Seiten mit Content-Security-Policy (z. B. DuckDuckGo). Der Autofokus der Seite wird ignoriert, die Startseite öffnet direkt die Adressleiste. Fernsurfer erscheint nicht mehr in der TizenBrew-Oberfläche. Hoch am oberen Rand öffnet die Adressleiste.
@@ -125,7 +122,7 @@ python -m http.server 8765 --bind 127.0.0.1
 
 ## Lizenzen
 
-- **Code** (`src/`, `tools/`, `test/`): MIT, siehe [LICENSE](LICENSE).
+- **Code** (`src/`, `tools/`): MIT, siehe [LICENSE](LICENSE).
 - **Filterdaten** in `dist/userScript.js`:
   - EasyList und EasyList Germany: © The EasyList authors, GPLv3 bzw. CC BY-SA 3.0 (https://easylist.to/pages/licence.html)
   - uBlock filters: © Raymond Hill und Mitwirkende, GPLv3 (https://github.com/uBlockOrigin/uAssets)

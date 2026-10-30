@@ -1,7 +1,7 @@
 {
   "name": "fernsurfer",
   "appName": "Fernsurfer",
-  "version": "1.2.0",
+  "version": "1.3.1",
   "description": "TV-Browser mit Favoriten-Startseite, Mauszeiger, Popup-Blocker und Werbefilter (EasyList, EasyList Germany, uBlock filters). Keine Telemetrie.",
   "packageType": "mods",
   "websiteURL": "https://html.duckduckgo.com/html/?fernsurfer",
